@@ -1,7 +1,7 @@
 # ittibitx
 Smallest possible set of code to initialize sbitx hardware and connect to external SDR software like SDRConsole.
 
-•	main() turns on the hardware and spawns the network thread (hpsdr_poll) and audio thread (sound_thread_start).
+•	main() initializes the hardware and spawns the network thread (hpsdr_poll) and audio thread (sound_thread_start).
 
 •	The external SDR app discovers the radio via the UDP thread and sends a start stream command.
 
