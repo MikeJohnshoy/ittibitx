@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdint.h>
 #include "sdr.h"
 #include "sound.h"
 #include "si5351.h"
@@ -16,13 +17,17 @@
 int freq_hdr = 7074000;
 int in_tx = 0; 
 int bfo_freq = 40035000;
+// Local oscillator for RX quadrature mixing
+static struct vfo lo;
 
 // Minimal Tuning Function
 void radio_tune_to(u_int32_t f) {
     freq_hdr = f;
     // Set Si5351 (Oscillator 2 usually used for RX in sBitx)
     // The IF offset is subtracted here if using an IF, adjust to your hardware needs.
-    si5351bx_setfreq(2, f + bfo_freq - 24000); 
+     si5351bx_setfreq(2, f + bfo_freq - 24000);
+    // Keep software LO in step with hardware tuning
+    vfo_start(&lo, freq_hdr, lo.phase);
     
     // Call set_lpf_40mhz(f) here if you still want automatic bandpass filter switching
     printf("Tuned to: %d Hz\n", f);
@@ -45,21 +50,38 @@ void sound_process(int32_t *input_rx, int32_t *input_mic,
 {
     static double i_samples[4096];
     static double q_samples[4096];
+    static int vfo_ready = 0;
 
-    // 1. Extract I and Q from the ALSA input
-    // The WM8731 gives us interleaved stereo (Left=I, Right=Q)
-    for(int i = 0; i < n_samples; i++) {
-        // Convert to double. Scale down if your hpsdr_p1.c expects normalized floats.
-        i_samples[i] = (double)input_rx[i * 2] / 200000000.0;
-        q_samples[i] = (double)input_rx[i * 2 + 1] / 200000000.0;
+    // Initialize LO once
+    if (!vfo_ready) {
+        vfo_init_phase_table();
+        vfo_start(&lo, freq_hdr, 0);
+        vfo_ready = 1;
     }
 
-    // 2. Ship the raw IQ baseband over the network
+    /* Channel roles retained:
+       input_rx  : left channel (RF baseband from codec)
+       input_mic : right channel (reserved for future TX path)
+       output_*  : muted here; TX/audio can be added later.
+    */
+    for (int n = 0; n < n_samples; n++) {
+        int32_t s = input_rx[n];                 // mono RX sample
+        int lo_i, lo_q;
+        vfo_read_iq(&lo, &lo_i, &lo_q);          // fixed‑point LO
+
+        double rf = (double)s / 2147483648.0;    // normalize 32-bit
+        double mix_i = rf * ((double)lo_i / 1073741824.0);
+        double mix_q = rf * ((double)lo_q / 1073741824.0);
+
+        i_samples[n] = mix_i;
+        q_samples[n] = mix_q;
+    }
+
     hpsdr_send_iq(i_samples, q_samples, n_samples);
 
-    // 3. Keep local outputs muted (RX only)
+    // Keep local outputs silent (RX-only streamer)
     memset(output_speaker, 0, n_samples * 2 * sizeof(int32_t));
-    memset(output_tx, 0, n_samples * 2 * sizeof(int32_t));
+    memset(output_tx,      0, n_samples * 2 * sizeof(int32_t));
 }
 
 // Barebones Setup for the WM8731 codec
@@ -76,6 +98,8 @@ int main(int argc, char **argv) {
     // 1. Initialize Hardware (I2C & Clock)
     i2cbb_init();
     si5351bx_init();
+    vfo_init_phase_table();
+    vfo_start(&lo, freq_hdr, 0);
     radio_tune_to(freq_hdr);
 
     // 2. Initialize Networking (HPSDR Protocol 1)
