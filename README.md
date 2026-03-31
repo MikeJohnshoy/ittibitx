@@ -7,6 +7,6 @@ Smallest possible set of code to initialize sbitx hardware and connect to extern
 
 •	The ALSA thread constantly reads chunks of 96kHz analog data from the radio hardware and hands it to sound_process().
 
-•	sound_process() instantly dumps the arrays into hpsdr_send_iq(), which chops it up, decimates it to 48kHz, and sends EP6 packets out over the network.
+•	sound_process() instantly performs complex mixing to baseband, dumps the arrays of I and Q data into hpsdr_send_iq(), which decimates it to 48kHz, and sends EP6 packets out over the network.
 
 •	The external SDR app handles all FFT processing, demodulation, AGC, and audio routing
