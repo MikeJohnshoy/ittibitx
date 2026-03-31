@@ -1,5 +1,5 @@
 // ittibitx.c
-// A tiny application that initializes the hardware in a sbitx,
+// A tiny application that initializes the sbitx radio hardware,
 // and allows a remote SDR application to control its operation over the network using
 // a subset of openHPSDR Protocol 1.
 
