@@ -13,22 +13,21 @@
 #include <string.h>
 #include <unistd.h>
 
-// Globals required by hpsdr_p1.c and routing
-int freq_hdr = 7074000; // starting freq, until we get commanded from remote
-int in_tx = 0;
-int bfo_freq = 40035000;
-static struct vfo lo;  // LO for RX quadrature mixing
+// globals
+int freq_hdr = 7074000;   // current freq we are tuned to, until we get commanded from remote
+int in_tx = 0;            // 0 = RX,  1 = TX
+int bfo_freq = 40035000;  // center frequency of our crystal filter (40.035 mHz)
+static struct vfo lo;     // LO for RX quadrature mixing values
 
-// minimal Tuning Function
+// tuning
 void radio_tune_to(u_int32_t f) {
   freq_hdr = f;
-  // Set Si5351 (Oscillator 2 usually used for RX in sBitx)
-  // The IF offset is subtracted here
+  // set Si5351 (Oscillator 2 usually used for RX in sBitx)
+  // the IF offset is subtracted here
   si5351bx_setfreq(2, f + bfo_freq - 24000);
-  // Keep software LO in step with hardware tuning
+  // keep software LO in step with hardware tuning
   vfo_start(&lo, freq_hdr, lo.phase);
   // call set_lpf_40mhz(f) here for bandpass filter switching
-  
   printf("Tuned to: %d Hz\n", f);
 }
 
@@ -49,7 +48,7 @@ void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speake
   static double q_samples[4096];
   static int vfo_ready = 0;
 
-  // Initialize LO once
+  // initialize LO once
   if (!vfo_ready) {
     vfo_init_phase_table();
     vfo_start(&lo, freq_hdr, 0);
@@ -107,10 +106,10 @@ int main(int argc, char **argv) {
 
   // Initialize Audio
   setup_audio_codec();
-  // This starts the background ALSA thread which repeatedly calls sound_process()
+  // this starts the background ALSA thread which repeatedly calls sound_process()
   sound_thread_start("hw:0,0");
 
-  // Main loop does nothing but keep the program alive
+  // main loop does nothing but keep the program alive
   while (1) {
     sleep(1);
   }
