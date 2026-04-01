@@ -1,4 +1,4 @@
-// ittibitx.c
+// minibitx.c
 // A tiny application that initializes the sbitx radio hardware,
 // and allows a remote SDR application to control its operation over the network using
 // a subset of openHPSDR Protocol 1.
@@ -89,7 +89,7 @@ void setup_audio_codec() {
 }
 
 int main(int argc, char **argv) {
-  printf("Starting MiniBitx IQ Streamer...\n");
+  printf("Starting miniBitx IQ Streamer...\n");
 
   // Initialize Hardware (I2C & si5351 Clock), filters, and software vfo
   i2cbb_init();
