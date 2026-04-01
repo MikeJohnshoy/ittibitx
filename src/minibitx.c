@@ -22,7 +22,7 @@ static struct vfo lo;     // LO for RX quadrature mixing values
 // tuning
 void radio_tune_to(u_int32_t f) {
   freq_hdr = f;
-  // set Si5351 (Oscillator 2 usually used for RX in sBitx)
+  // set Si5351 (oscillator 2 used for RX in sBitx)
   // the IF offset is subtracted here
   si5351bx_setfreq(2, f + bfo_freq - 24000);
   // keep software LO in step with hardware tuning
