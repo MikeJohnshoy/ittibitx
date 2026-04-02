@@ -11,7 +11,6 @@
 #include <fcntl.h> 
 #include <math.h>
 #include <complex.h>
-#include <fftw3.h>
 #include <unistd.h>
 #include <wiringPi.h>
 #include <linux/types.h>
