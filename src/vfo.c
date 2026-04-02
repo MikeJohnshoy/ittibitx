@@ -3,15 +3,7 @@
 // The vfo_read() is preserved but vfo_read_iq() is now preferred.
 
 #include "vfo.h"
-#include <complex.h>
-#include <fftw3.h>
-#include <linux/types.h>
 #include <math.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <time.h>
-#include <unistd.h>
 
 // we define one more lookup table entry than needed, so that each quadrant
 // has both endpoints of 90 degree range
