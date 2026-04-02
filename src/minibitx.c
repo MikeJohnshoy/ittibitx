@@ -4,7 +4,6 @@
 // a subset of openHPSDR Protocol 1.
 
 #include "hpsdr_p1.h"
-#include "sdr.h"
 #include "si5351.h"
 #include "ma_sound.h"
 #include <stdint.h>
