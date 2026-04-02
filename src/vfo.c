@@ -2,7 +2,7 @@
 // derived from Farhan's original vfo.c
 // The vfo_read() is preserved but vfo_read_iq() is now preferred.
 
-#include "sdr.h"
+#include "vfo.h"
 #include <complex.h>
 #include <fftw3.h>
 #include <linux/types.h>
