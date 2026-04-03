@@ -134,6 +134,16 @@ static void build_and_send_packet(void)
     }
 
     if (client_active) {
+        // DEBUG CODE TO SEE IF PKTS ARE GOING OUT
+        static int dbg = 0;
+        if ((dbg++ % 200) == 0) {
+            printf("EP6 seq=%u cc0=%02X cc1=%02X i0=%02X%02X%02X q0=%02X%02X%02X\n",
+                   tx_seq - 1,
+                   pkt[11],          // frame0 C0
+                   pkt[11 + 512],    // frame1 C0
+                   pkt[16], pkt[17], pkt[18],
+                   pkt[19], pkt[20], pkt[21]);
+        }
         sendto(hpsdr_sock, pkt, sizeof(pkt), 0,
                (struct sockaddr *)&stream_dest, sizeof(stream_dest));
     }
