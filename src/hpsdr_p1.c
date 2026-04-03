@@ -195,22 +195,18 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
         }
         break;
 
-    case 0x04:  // Start/Stop streaming
-        {
-            // Some clients use bit0, some send nonzero in buf[3] for start.
-            int start = (buf[3] & 0x01) || (buf[3] != 0x00);
-
-            if (start) {
-                stream_dest = *sender;
-                tx_seq = 0;
-                iq_buf_count = 0;
-                client_active = 1;
-                printf("hpsdr: streaming STARTED to %s:%d\n",
-                       inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
-            } else {
-                client_active = 0;
-                printf("hpsdr: streaming STOPPED\n");
-            }
+    case 0x04:  // Start / stop streaming
+        if (buf[3] & 0x01) {
+            stream_dest = *sender;
+            stream_dest.sin_port = htons(HPSDR_PORT);   // force IQ stream to 1024
+            tx_seq = 0;
+            iq_buf_count = 0;
+            client_active = 1;
+            printf("hpsdr: streaming STARTED to %s:%d (forced)\n",
+                   inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
+        } else {
+            client_active = 0;
+            printf("hpsdr: streaming STOPPED\n");
         }
         break;
 
