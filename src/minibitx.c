@@ -82,6 +82,7 @@ void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speake
   }
 #else
   // Normal RX path
+  printf("NORMAL RX PATH ACTIVE\n");
   if (!vfo_ready) {
     vfo_init_phase_table();
     vfo_start(&lo, freq_hdr, 0);
