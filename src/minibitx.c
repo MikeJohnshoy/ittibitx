@@ -129,8 +129,8 @@ void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speake
   hpsdr_send_iq(i_samples, q_samples, n_samples);
 
   // keep local outputs silent
-  memset(output_speaker, 0, n_samples * 2 * sizeof(int32_t));
-  memset(output_tx, 0, n_samples * 2 * sizeof(int32_t));
+  memset(output_speaker, 0, n_samples * sizeof(int32_t));
+  memset(output_tx, 0, n_samples * sizeof(int32_t));
 }
 
 // barebones Setup for the WM8731 codec
