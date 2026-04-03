@@ -213,22 +213,31 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
 
     case 0x04:  // Start / stop streaming
         {
-            // Some clients use bit0, others send any nonzero in buf[3] for START.
             int start = ((buf[3] & 0x01) != 0) || (buf[3] != 0x00);
         
             if (start) {
-                stream_dest = *sender;
+                int same_dest =
+                    client_active &&
+                    sender->sin_addr.s_addr == stream_dest.sin_addr.s_addr;
         
-                // Preferred: send IQ to HPSDR UDP port.
-                // If you want compatibility fallback later, we can add dynamic switching.
-                stream_dest.sin_port = htons(HPSDR_PORT);
+                // keep forced 1024 if needed
+                struct sockaddr_in new_dest = *sender;
+                new_dest.sin_port = htons(HPSDR_PORT);
         
-                tx_seq = 0;
-                iq_buf_count = 0;
+                if (!same_dest) {
+                    stream_dest = new_dest;
+                    tx_seq = 0;
+                    iq_buf_count = 0;
+                    printf("hpsdr: streaming STARTED cmd=%u to %s:%d\n",
+                           (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
+                } else {
+                    // repeated START from same client: keep streaming, do not reset seq/buffer
+                    stream_dest = new_dest; // refresh anyway
+                    printf("hpsdr: streaming keepalive START cmd=%u from %s\n",
+                           (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr));
+                }
+        
                 client_active = 1;
-        
-                printf("hpsdr: streaming STARTED cmd=%u to %s:%d\n",
-                       (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
             } else {
                 client_active = 0;
                 printf("hpsdr: streaming STOPPED cmd=%u\n", (unsigned)buf[3]);
