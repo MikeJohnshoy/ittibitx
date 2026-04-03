@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
 
   // Initialize Audio
   setup_audio_codec();
-  // this starts the background miniaudio thread which repeatedly calls sound_process()
+  // this starts the background audio thread which repeatedly calls sound_process()
   sound_thread_start("hw:0,0");
 
   // main loop does nothing but keep the program alive
