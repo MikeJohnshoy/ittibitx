@@ -1,7 +1,5 @@
-/* sound.c — Minimal ALSA full-duplex driver for minibitx.
- * Replaces ma_sound.c + miniaudio.h with direct ALSA PCM calls.
- * Retains ALSA mixer control for WM8731 codec hardware setup.
- */
+// sound.c
+// Minimal ALSA full-duplex driver for minibitx.
 
 #include "sound.h"
 #include <stdio.h>
