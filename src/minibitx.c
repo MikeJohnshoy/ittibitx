@@ -61,6 +61,13 @@ void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speake
   //   output_*  : muted here; TX/audio can be added later.
   for (int n = 0; n < n_samples; n++) {
     int32_t s = input_rx[n]; // mono RX sample
+
+    // SOME DEBUG CODE
+    static int dbg=0;
+    if ((dbg++ % 20000)==0) {
+      printf("audio in: input_rx[0]=%d\n", input_rx[0]);
+    }
+    
     int lo_i, lo_q;
     vfo_read_iq(&lo, &lo_i, &lo_q);
     // generate I and Q from single real input sample
