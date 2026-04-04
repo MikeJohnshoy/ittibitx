@@ -235,9 +235,7 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                            (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
                 } else {
                     // repeated START from same client: keep streaming, do not reset seq/buffer
-                    stream_dest = new_dest; // refresh anyway
-                    printf("hpsdr: streaming keepalive START cmd=%u from %s\n",
-                           (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr));
+                    stream_dest = new_dest;   // refresh anyway
                 }
         
                 client_active = 1;
