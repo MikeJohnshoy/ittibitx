@@ -32,8 +32,9 @@ static int iq_buf_count = 0;
 static double hpsdr_iq_gain = 30.0;  // <<<<< add gain to I and Q data going out
 
 extern void remote_execute(char *command);
+extern void radio_set_tx(int tx_on);
 extern int freq_hdr;
-extern int in_tx;
+extern int in_tx;   // read-only here — radio_set_tx() owns writing it
 
 // --- Packet construction & inline transmission ------------------------------
 
@@ -276,8 +277,13 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                     }
                 }
 
-                // Track MOX from host control bit (optional but useful)
-                in_tx = (c0 & 0x01) ? 1 : 0;
+                // Track MOX from host control bit. Edge-triggered: this
+                // C&C byte arrives on every frame, but radio_set_tx()
+                // drives GPIO with settling delays, so only call it when
+                // the requested state actually changes.
+                int want_tx = (c0 & 0x01) ? 1 : 0;
+                if (want_tx != in_tx)
+                    radio_set_tx(want_tx);
             }
         }
         break;
