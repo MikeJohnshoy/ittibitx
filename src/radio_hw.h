@@ -12,11 +12,16 @@
  * sense to bring the already-verified control code over wholesale rather
  * than re-derive a smaller subset.
  *
- * minibitx does not yet act on TX_LINE/TX_POWER/EXT_PTT or the INA260 —
- * there is no PTT or battery-monitoring logic here today — but the GPIO
- * lines are still initialized to a safe idle state at boot, and the
- * functions are available for the control surfaces (HPSDR now, Hamlib
- * next) to call once that logic exists.
+ * minibitx does not yet act on TX_POWER or the INA260 — there is no
+ * battery-monitoring logic here today — but the GPIO lines are still
+ * initialized to a safe idle state at boot, and the functions are
+ * available for the control surfaces (HPSDR now, Hamlib next) to call
+ * once that logic exists.
+ *
+ * radio_hw_set_ptt() / radio_hw_set_tx_relay() are the two GPIO
+ * primitives behind PTT: radio_set_tx() in radio.c sequences them (with
+ * the relay-settling delay between them) and is what HPSDR's MOX bit and,
+ * later, Hamlib's PTT command actually call.
  *
  * As in sbitx, the local oscillator (si5351v2.c/si5351.h) and the I2C bus
  * driver (i2cbb.c/i2cbb.h) are left as their own single-purpose files and
@@ -29,7 +34,7 @@
 
 /* ---- GPIO pin assignments (wiringPi numbering, sBitx v2 hardware) ----- */
 
-#define TX_LINE   4    // T/R relay control line (not yet driven by minibitx)
+#define TX_LINE   4    // T/R relay control line
 #define TX_POWER  27   // set once at boot, LOW; purpose unconfirmed in sbitx
 #define EXT_PTT   26   // external PTT input/output line
 #define LPF_A     5    // low-pass filter select lines, one active at a time
@@ -57,6 +62,14 @@ int radio_hw_detect_version(void);
  * exactly one of the four LPF_x lines high and the rest low. No-op if the
  * frequency falls in the same filter's passband as the last call. */
 void set_lpf_40mhz(int frequency);
+
+/* Drives the external PTT line (EXT_PTT) high (on) or low (off). No
+ * delay, no policy — see radio_set_tx() in radio.c for sequencing. */
+void radio_hw_set_ptt(int on);
+
+/* Drives the T/R relay control line (TX_LINE) high (on, transmit) or low
+ * (off, receive). Same no-delay/no-policy contract as radio_hw_set_ptt(). */
+void radio_hw_set_tx_relay(int on);
 
 /* Reads the INA260 power monitor's voltage (V) and current (A) registers
  * over I2C. On any I2C error, both outputs are set to 0.0. */
