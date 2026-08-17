@@ -2,185 +2,36 @@
 // A tiny application that initializes the sbitx radio hardware,
 // and allows a remote SDR application to control its operation over the network using
 // a subset of openHPSDR Protocol 1.
+//
+// Hardware control (GPIO/LPF/oscillator/codec) lives in radio_hw.c and
+// si5351v2.c; tuning/control glue lives in radio.c; audio capture and
+// IQ mixing live in sound.c. This file just brings them up in order.
 
 #include "hpsdr_p1.h"
 #include "si5351.h"
 #include "sound.h"
 #include "vfo.h"
-#include <stdint.h>
+#include "radio.h"
+#include "radio_hw.h"
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <math.h>
-#include <wiringPi.h>  // already linked via wiringPi
-
-// LPF relay GPIO pins (wiringPi numbering, matching sBitx v2 hardware)
-#define LPF_A 5
-#define LPF_B 6
-#define LPF_C 10
-#define LPF_D 11
-
-// globals
-int freq_hdr = 7074000;   // current freq we are tuned to, until we get commanded from remote
-int in_tx = 0;            // 0 = RX,  1 = TX
-int bfo_freq = 40035000;  // center frequency of our crystal filter (40.035 mHz)
-static struct vfo lo;     // LO for RX quadrature mixing values
-
-static int prev_lpf = -1;
-
-void set_lpf_40mhz(int frequency) {
-    int lpf = 0;
-    if (frequency < 5500000)
-        lpf = LPF_D;           // 80m/160m
-    else if (frequency < 10500000)
-        lpf = LPF_C;           // 40m/30m
-    else if (frequency < 18500000)
-        lpf = LPF_B;           // 20m/17m
-    else if (frequency < 30000000)
-        lpf = LPF_A;           // 15m/12m/10m
-
-    if (lpf == prev_lpf)
-        return;
-
-    digitalWrite(LPF_A, LOW);
-    digitalWrite(LPF_B, LOW);
-    digitalWrite(LPF_C, LOW);
-    digitalWrite(LPF_D, LOW);
-
-    digitalWrite(lpf, HIGH);
-    prev_lpf = lpf;
-    printf("LPF: selected pin %d for %d Hz\n", lpf, frequency);
-}
-// tuning
-void radio_tune_to(u_int32_t f) {
-    freq_hdr = f;
-    si5351bx_setfreq(2, f + bfo_freq - 24000);
-    vfo_start(&lo, freq_hdr, lo.phase);
-    set_lpf_40mhz(f);    // enable the correct LPF for this band
-    printf("Tuned to: %d Hz\n", f);
-}
-
-// hpsdr_p1.c parses EP2 host commands and calls this to change frequency
-void remote_execute(char *command) {
-  if (strncmp(command, "freq ", 5) == 0) {
-    int f = atoi(command + 5);
-    if (f > 0) {
-      radio_tune_to(f);
-    }
-  }
-}
-
-// driven by the ALSA capture thread in sound.c
-// Debug/test toggles (set to 1 to enable)
-#define IQ_TEST_TONE         0
-#define IQ_DEBUG_AUDIO_BLOCK 1
-#define IQ_DEBUG_MIX_BLOCK   1
-
-void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speaker,
-                   int32_t *output_tx, int n_samples) {
-  static double i_samples[4096];
-  static double q_samples[4096];
-  static int vfo_ready = 0;
-
-  // Runtime test switch (NO preprocessor confusion)
-  // 0 = normal RX->IQ path, 1 = synthetic tone path
-  static int force_tone = 0;
-
-  if (n_samples > 4096) n_samples = 4096;
-
-  // Audio input debug
-  {
-    static int dbg_blk = 0;
-    if ((dbg_blk++ % 200) == 0) {
-      int32_t minv = 2147483647, maxv = -2147483647;
-      for (int j = 0; j < n_samples; j++) {
-        if (input_rx[j] < minv) minv = input_rx[j];
-        if (input_rx[j] > maxv) maxv = input_rx[j];
-      }
-      printf("audio block n=%d min=%d max=%d first=%d\n",
-             n_samples, minv, maxv, input_rx[0]);
-    }
-  }
-
-  if (force_tone) {
-    static int once_tone = 0;
-    if (!once_tone++) printf("### TONE PATH ACTIVE ###\n");
-
-    static double ph = 0.0;
-    for (int n = 0; n < n_samples; n++) {
-      ph += 2.0 * 3.141592653589793 * 1000.0 / 48000.0;
-      if (ph >= 2.0 * 3.141592653589793) ph -= 2.0 * 3.141592653589793;
-      i_samples[n] = 0.2 * sin(ph);
-      q_samples[n] = 0.2 * cos(ph);
-    }
-  } else {
-    static int once_norm = 0;
-    if (!once_norm++) printf("### NORMAL RX PATH ACTIVE ###\n");
-
-    if (!vfo_ready) {
-      vfo_init_phase_table();
-      vfo_start(&lo, freq_hdr, 0);
-      vfo_ready = 1;
-    }
-
-    for (int n = 0; n < n_samples; n++) {
-      int32_t s = input_rx[n];
-      int lo_i, lo_q;
-      vfo_read_iq(&lo, &lo_i, &lo_q);
-
-      // S32 -> [-1, +1)
-      double rf = (double)s / 2147483648.0;
-
-      // Mix to IQ
-      i_samples[n] = rf * ((double)lo_i / 1073741824.0);
-      q_samples[n] = rf * ((double)lo_q / 1073741824.0);
-    }
-  }
-
-  // Mixed IQ debug
-  {
-    static int dbg_mix = 0;
-    if ((dbg_mix++ % 200) == 0) {
-      double min_i =  1e9, max_i = -1e9;
-      double min_q =  1e9, max_q = -1e9;
-      for (int j = 0; j < n_samples; j++) {
-        if (i_samples[j] < min_i) min_i = i_samples[j];
-        if (i_samples[j] > max_i) max_i = i_samples[j];
-        if (q_samples[j] < min_q) min_q = q_samples[j];
-        if (q_samples[j] > max_q) max_q = q_samples[j];
-      }
-      printf("mix block n=%d I[min=% .6f max=% .6f] Q[min=% .6f max=% .6f]\n",
-             n_samples, min_i, max_i, min_q, max_q);
-    }
-  }
-
-  hpsdr_send_iq(i_samples, q_samples, n_samples);
-
-  // keep local outputs silent
-  memset(output_speaker, 0, n_samples * sizeof(int32_t));
-  memset(output_tx, 0, n_samples * sizeof(int32_t));
-}
-
-// barebones Setup for the WM8731 codec
-void setup_audio_codec() {
-  sound_mixer("hw:0", "Input Mux", 0);
-  sound_mixer("hw:0", "Line", 80);  // 80% of max
-  sound_mixer("hw:0", "Mic", 0);
-  sound_mixer("hw:0", "Master", 0); // Mute local speaker
-}
 
 int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+
   printf("Starting miniBitx IQ Streamer...\n");
-  
-  // Initialize wiringPi (must be done before any pinMode/digitalRead/Write)
-  if (wiringPiSetupGpio() < 0) {            // or wiringPiSetup()
-    fprintf(stderr, "Failed to init wiringPi\n");
+
+  // Initialize wiringPi and put all GPIO lines (LPF relays, TX_LINE,
+  // TX_POWER, EXT_PTT) into their idle state.
+  if (radio_hw_gpio_init() < 0) {
+    fprintf(stderr, "Failed to init wiringPi/GPIO\n");
     return -1;
   }
 
-  // Initialize Hardware (I2C & si5351 Clock), filters, and software vfo
-  i2cbb_init();
+  // Initialize the si5351 clock generator (this also brings up the I2C
+  // bus it needs — see si5351v2.c) and the software RX VFO, then tune to
+  // the startup frequency.
   si5351bx_init();
   vfo_init_phase_table();
   vfo_start(&lo, freq_hdr, 0);

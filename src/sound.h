@@ -15,10 +15,8 @@ void sound_thread_stop(void);
    Handles switches, volumes, and enumerated controls. */
 void sound_mixer(char *card_name, char *element, int make_on);
 
-/* User-supplied callback — called from the audio thread each period.
-   Defined in minibitx.c (not here). */
-void sound_process(int32_t *input_rx, int32_t *input_mic,
-                   int32_t *output_speaker, int32_t *output_tx,
-                   int n_samples);
+/* Barebones WM8731 codec setup (input mux, levels, mute local speaker).
+   Call once, after the ALSA devices are otherwise ready. */
+void setup_audio_codec(void);
 
 #endif /* SOUND_H */
