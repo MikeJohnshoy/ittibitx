@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include "usb_gadget.h"
 
 #define HPSDR_PORT 1024
 #define HPSDR_PKT_SIZE 1032
@@ -163,11 +164,22 @@ static void build_and_send_packet(void)
 
 // Called continuously with 48kHz samples from the RX processing chain.
 // No filtering or decimation required; just gain and packetization.
+//
+// Two independent consumers of the same IQ: the HPSDR/UDP stream (below)
+// and the USB Audio Class gadget (usb_gadget.c). Either can be active
+// without the other — a client on just USB audio, with no HPSDR app
+// connected, still gets IQ.
 void hpsdr_send_iq(double *i_samples, double *q_samples, int n)
 {
-    if (!client_active || hpsdr_sock < 0) return;
+    int hpsdr_live = client_active && (hpsdr_sock >= 0);
+    int uac_live = uac_is_active();
+    if (!hpsdr_live && !uac_live) return;
 
     for (int k = 0; k < n; k++) {
+        uac_push_iq(i_samples[k], q_samples[k]);
+
+        if (!hpsdr_live) continue;
+
         iq_buf_i[iq_buf_count] = i_samples[k] * hpsdr_iq_gain;
         iq_buf_q[iq_buf_count] = q_samples[k] * hpsdr_iq_gain;
         iq_buf_count++;
