@@ -96,6 +96,18 @@ void set_lpf_40mhz(int frequency)
 	printf("LPF: selected pin %d for %d Hz\n", lpf, frequency);
 }
 
+/* ---- T/R relay and external PTT ------------------------------------------ */
+
+void radio_hw_set_ptt(int on)
+{
+	digitalWrite(EXT_PTT, on ? HIGH : LOW);
+}
+
+void radio_hw_set_tx_relay(int on)
+{
+	digitalWrite(TX_LINE, on ? HIGH : LOW);
+}
+
 /* ---- INA260 power monitor ------------------------------------------------ */
 
 void read_voltage_current(float *voltage, float *current)
