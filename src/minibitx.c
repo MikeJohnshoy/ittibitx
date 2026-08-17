@@ -5,7 +5,8 @@
 //
 // Hardware control (GPIO/LPF/oscillator/codec) lives in radio_hw.c and
 // si5351v2.c; tuning/control glue lives in radio.c; audio capture and
-// IQ mixing live in sound.c. This file just brings them up in order.
+// IQ mixing live in sound.c; the optional USB Audio Class IQ gadget lives
+// in usb_gadget.c. This file just brings them up in order.
 
 #include "hpsdr_p1.h"
 #include "si5351.h"
@@ -13,6 +14,7 @@
 #include "vfo.h"
 #include "radio.h"
 #include "radio_hw.h"
+#include "usb_gadget.h"
 #include <stdio.h>
 #include <unistd.h>
 
@@ -43,6 +45,14 @@ int main(int argc, char **argv) {
     return -1;
   }
   hpsdr_poll(); // Starts the listener thread for connection/tuning requests
+
+  // Bring up the USB Audio Class (UAC2) IQ gadget, if the hardware/kernel
+  // support it (needs a USB device-mode controller and snd-aloop). Not a
+  // hard failure if it's unavailable — minibitx keeps running over
+  // HPSDR/UDP either way.
+  if (uac_init() < 0) {
+    fprintf(stderr, "USB IQ gadget unavailable, continuing without it\n");
+  }
 
   // Initialize Audio
   setup_audio_codec();
