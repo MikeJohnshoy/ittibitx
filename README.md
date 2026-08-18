@@ -1,8 +1,8 @@
 # minibitx    -- an experimental test bed
 
-Minimal set of code to initialize sbitx hardware and allow external SDR software (like quisk or SDRConsole) to connect and use the radio.  It runs on the rpi board in your sbitx.  It provides no user interface at all other than minimal messages on the console used to start minibitx. I started by looking at the big files making up the sbitx system, and asking what is the minimum set of code I need to allow external SDR apps to run.  
+Minimal set of code to initialize sbitx hardware and allow external SDR software (like quisk or SDRConsole) to connect and use the radio.  It runs on the rpi board in your sbitx.  It provides no user interface at all other than minimal messages on the console used to start minibitx. I started by looking at the big files making up the sbitx system, and asking what is the minimum set of code I need to preserve to allow external SDR apps to run. Of course I am tempted to keep putting more and more back in, but I'm showing some restraint.
 
-•	main() (src/minibitx.c) brings up the pieces in order: GPIO/hardware init, the oscillator and software RX VFO, the network thread (hpsdr_poll), the audio codec, and the audio thread (sound_thread_start). It does no hardware or protocol work itself.
+•	main() (src/minibitx.c) brings up the pieces in order: GPIO/hardware init, the oscillator chip and software RX VFO, the network thread (hpsdr_poll), the audio codec, and the audio thread (sound_thread_start). It does no hardware or protocol work itself.
 
 •	Radio hardware control — GPIO setup, LPF band switching, board-revision detection, and the INA260 power monitor — lives in src/radio_hw.c/.h, carried over from the same split done in the sbitx repo. The si5351 oscillator (src/si5351v2.c) and the I2C bus driver (src/i2cbb.c) remain their own single-purpose files.
 
