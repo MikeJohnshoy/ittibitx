@@ -11,12 +11,10 @@ DESCRIPTION:  Minimal set of code to initialize sbitx hardware and allow externa
 
 •	The external SDR app discovers the radio via the UDP thread and sends a start stream command.
 
-•	The audio thread (src/sound.c) reads IF data from the audio chip at 48k samples per second, does a 24 kHz anti-aliasing filter and sends 48k samples per second to sound_process().
+•	The audio thread (src/sound.c) reads IF data from the audio chip at 48k samples per second, and passes the samples to sound_process().
 
 •	sound_process() (src/sound.c) performs complex mixing to baseband, passes the arrays of I and Q data to hpsdr_send_iq() for hpsdr Protocol 1 over the network.
 
-•	hpsdr_send_iq() (src/hpsdr_p1.c) feeds two independent consumers of that same IQ: the HPSDR/UDP stream, and — if the hardware/kernel support it — a USB Audio Class 2.0 (UAC2) gadget in src/usb_gadget.c/.h that presents the radio as a standard USB audio capture device. Either can be used without the other; USB audio doesn't require an HPSDR client to be connected.
+•	hpsdr_send_iq() (src/hpsdr_p1.c) was the original interface with external SDR apps, but there are now two two independent consumers of that same IQ: the HPSDR/UDP stream, and — if the hardware/kernel support it — a USB Audio Class 2.0 (UAC2) gadget in src/usb_gadget.c/.h that presents the radio as a standard USB audio capture device. The same data goes out both interfaces.  Either can be used without the other; USB audio doesn't require an HPSDR client to be connected.
 
-•	The external SDR app handles all FFT processing, demodulation of various signal types, and audio routing
-
-
+•	The external SDR app handles all FFT processing, modulationi and demodulation of various signal types that were formerly done by sbitx code that has been removed.
