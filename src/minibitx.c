@@ -6,7 +6,8 @@
 // Hardware control (GPIO/LPF/oscillator/codec) lives in radio_hw.c and
 // si5351v2.c; tuning/control glue lives in radio.c; audio capture and
 // IQ mixing live in sound.c; the optional USB Audio Class IQ gadget lives
-// in usb_gadget.c. This file just brings them up in order.
+// in usb_gadget.c; the console status line lives in status.c. This file
+// just brings them up in order.
 
 #include "hpsdr_p1.h"
 #include "si5351.h"
@@ -15,6 +16,7 @@
 #include "radio.h"
 #include "radio_hw.h"
 #include "usb_gadget.h"
+#include "status.h"
 #include <stdio.h>
 #include <unistd.h>
 
@@ -59,9 +61,11 @@ int main(int argc, char **argv) {
   // this starts the background audio thread which repeatedly calls sound_process()
   sound_thread_start("hw:0,0");
 
-  // main loop does nothing but keep the program alive
+  // Idle loop: keep the program alive and, once a second, refresh the
+  // console status line (freq / TX-RX / drive) — see status.c.
   while (1) {
     sleep(1);
+    status_print();
   }
 
   return 0;
