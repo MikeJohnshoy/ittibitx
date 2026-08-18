@@ -1,7 +1,7 @@
 // minibitx.c
 // A tiny application that initializes the sbitx radio hardware,
 // and allows a remote SDR application to control its operation over the network using
-// a subset of openHPSDR Protocol 1.
+// a subset of openHPSDR Protocol 1 and command sent to remote_execute()
 //
 // Hardware control (GPIO/LPF/oscillator/codec) lives in radio_hw.c and
 // si5351v2.c; tuning/control glue lives in radio.c; audio capture and
