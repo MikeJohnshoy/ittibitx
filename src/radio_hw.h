@@ -3,12 +3,9 @@
  * LPF band switching, board-revision detection, and the INA260 power
  * monitor.
  *
- * This is a port of the radio_hw module carved out of sbitx (see
- * radio_hardware_inventory.md in the sbitx repo for the original survey).
- * minibitx was left without most of this at first only because it started
- * as a deliberately minimal test bed — the underlying sBitx v2 hardware
- * (LPF relays, TX_LINE/TX_POWER/EXT_PTT lines, the power/SWR bridge board,
- * the INA260 power monitor) is the same hardware either way, so it makes
+ * This is a port of the radio_hw module code carved out of sbitx (LPF relays, 
+ * TX_LINE/TX_POWER/EXT_PTT lines, the power/SWR bridge board,
+ * the INA260 power monitor) is the same hardware so it makes
  * sense to bring the already-verified control code over wholesale rather
  * than re-derive a smaller subset.
  *
