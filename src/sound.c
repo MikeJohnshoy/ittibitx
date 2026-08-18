@@ -28,7 +28,7 @@ static pthread_t  audio_thread;
 static volatile int g_running = 0;
 
 /* ------------------------------------------------------------------ */
-/*  ALSA mixer helper — unchanged from sbitx / ma_sound.c              */
+/*  ALSA mixer helper - unchanged from sbitx / ma_sound.c              */
 /* ------------------------------------------------------------------ */
 void sound_mixer(char *card_name, char *element, int make_on)
 {
@@ -70,7 +70,7 @@ void sound_mixer(char *card_name, char *element, int make_on)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Codec hardware setup — barebones WM8731 init                      */
+/*  Codec hardware setup - barebones WM8731 init                      */
 /* ------------------------------------------------------------------ */
 void setup_audio_codec(void) {
   sound_mixer("hw:0", "Input Mux", 0);
@@ -108,7 +108,7 @@ static snd_pcm_t *open_pcm(const char *dev, snd_pcm_stream_t dir)
     snd_pcm_uframes_t period = PERIOD_FRAMES;
     snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, 0);
 
-    /* 4 periods ≈ 85 ms buffer — enough headroom for a Pi */
+    /* 4 periods ~ 85 ms buffer - enough headroom for a Pi */
     snd_pcm_uframes_t buffer = period * 4;
     snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &buffer);
 
@@ -142,14 +142,18 @@ static int xrun_recover(snd_pcm_t *pcm, int err)
 }
 
 /* ------------------------------------------------------------------ */
-/*  IQ mixing — RX audio -> baseband IQ -> hpsdr_send_iq()             */
+/*  IQ mixing - RX audio -> baseband IQ -> hpsdr_send_iq()             */
 /*  DSP, not hardware control: uses the software RX VFO (vfo.c) and    */
 /*  the tuning state owned by radio.c.                                 */
 /* ------------------------------------------------------------------ */
-// Debug/test toggles (set to 1 to enable)
+// Debug/test toggles (set to 1 to enable). Default OFF: status_print()
+// (status.c) is the intended low-overhead console output now: these
+// per-block debug prints fire from the audio thread with no coordination
+// with it, and being unsynchronized on the same stdout, they collide with
+// its in-place redraw (no trailing newline) and garble both lines.
 #define IQ_TEST_TONE         0
-#define IQ_DEBUG_AUDIO_BLOCK 1
-#define IQ_DEBUG_MIX_BLOCK   1
+#define IQ_DEBUG_AUDIO_BLOCK 0
+#define IQ_DEBUG_MIX_BLOCK   0
 
 static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speaker,
                    int32_t *output_tx, int n_samples) {
@@ -165,6 +169,7 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
 
   if (n_samples > 4096) n_samples = 4096;
 
+#if IQ_DEBUG_AUDIO_BLOCK
   // Audio input debug
   {
     static int dbg_blk = 0;
@@ -178,6 +183,7 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
              n_samples, minv, maxv, input_rx[0]);
     }
   }
+#endif
 
   if (force_tone) {
     static int once_tone = 0;
@@ -214,6 +220,7 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
     }
   }
 
+#if IQ_DEBUG_MIX_BLOCK
   // Mixed IQ debug
   {
     static int dbg_mix = 0;
@@ -230,6 +237,7 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
              n_samples, min_i, max_i, min_q, max_q);
     }
   }
+#endif
 
   hpsdr_send_iq(i_samples, q_samples, n_samples);
 
@@ -239,7 +247,7 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
 }
 
 /* ------------------------------------------------------------------ */
-/*  Audio thread — capture → sound_process() → playback               */
+/*  Audio thread - capture -> sound_process() -> playback               */
 /* ------------------------------------------------------------------ */
 static void *audio_loop(void *arg)
 {
@@ -270,7 +278,7 @@ static void *audio_loop(void *arg)
         }
 
         sound_process(rx_buf, mic_buf, spk_buf, tx_buf, n);
-        // No playback write — output goes over HPSDR network
+        // No playback write - output goes over HPSDR network
     }
 
     return NULL;
@@ -286,7 +294,7 @@ int sound_thread_start(const char *device_name)
     pcm_capture = open_pcm(dev, SND_PCM_STREAM_CAPTURE);
     if (!pcm_capture) return -1;
 
-    // No playback needed — IQ goes out over the network, not local audio
+    // No playback needed - IQ goes out over the network, not local audio
     pcm_playback = NULL;
 
     g_running = 1;
