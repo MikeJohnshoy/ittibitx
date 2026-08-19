@@ -5,8 +5,15 @@
 #include "i2cbb.h"
 #include "si5351.h"
 
-#define SDA 23 
-#define SCL 22
+// The si5351 turned out to be wired to the same physical bus as this
+// board's RTC (GPIO13/GPIO6), not GPIO23/22 as originally assumed -
+// confirmed via `i2cdetect -y 22` showing a device answering at
+// SI5351_ADDR (0x60). i2c-22 is the Linux I2C bus number the kernel
+// assigned to this board's `dtoverlay=i2c-rtc-gpio` entry (see
+// `i2cdetect -l`) - not guaranteed to stay 22 forever (kernel/config
+// changes can renumber it), so re-check with `i2cdetect -l` if the
+// si5351 ever stops responding after an OS update.
+#define SI5351_I2C_BUS 22
 
 #define SI_CLK0_CONTROL  16      // Register definitions
 #define SI_CLK1_CONTROL 17
@@ -57,10 +64,19 @@ void i2cSendRegister(uint8_t reg, uint8_t* data, uint8_t n){
 }
 */
 
-void i2cSendRegister(uint8_t reg, uint8_t val){ 
+#define I2C_SEND_MAX_ATTEMPTS 20   // ~20ms worst case (1ms delay/attempt) before giving up
+
+void i2cSendRegister(uint8_t reg, uint8_t val){
+  int attempts = 0;
   while (i2cbb_write_byte_data(SI5351_ADDR, reg, val) < 0)
   {
     printf("Repeating I2C #%d\n",i2c_error_count++);  // reports number of I2C repeats caused by errors
+    attempts++;
+    if (attempts >= I2C_SEND_MAX_ATTEMPTS) {
+      printf("i2cSendRegister: giving up on si5351 reg 0x%02x after %d attempts "
+             "- check SDA/SCL pull-ups and wiring\n", reg, attempts);
+      return;   // give up on this write rather than hang forever
+    }
     delay(1);
   }
 }
@@ -250,8 +266,8 @@ void si5351_set_calibration(int32_t cal){
     xtal_freq_calibrated = cal;
 }
 
-void si5351bx_init(){ 
-  i2cbb_init(SDA, SCL);
+void si5351bx_init(){
+  i2cbb_init(SI5351_I2C_BUS);
 	delay(10);
   si5351_reset();
 	delay(10);
