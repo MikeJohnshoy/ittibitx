@@ -4,14 +4,17 @@
  * This ties the hardware primitives (radio_hw.c: oscillator via si5351v2.c,
  * LPF switching, T/R relay and PTT GPIO) together with the software
  * receive VFO (vfo.c, which is DSP, not hardware) under radio_tune_to()
- * and radio_set_tx(), and exposes remote_execute() as the single entry
- * point external control surfaces use to drive the radio.
+ * and radio_set_tx(), and exposes them as the entry points every control
+ * surface drives the radio through - never a second place that pokes
+ * hardware directly.
  *
- * Today remote_execute() is called only from the HPSDR command parser
- * (hpsdr_p1.c), which also calls radio_set_tx() directly on MOX changes.
- * When Hamlib/rigctld support is added, it becomes a second caller into
- * the same functions here rather than a second place that pokes hardware
- * directly.
+ * Two callers today: hamlib.c's rigctld-compatible server (f/F for
+ * frequency, t/T for PTT - the sole frequency control surface) and
+ * hpsdr_p1.c's EP2 command parser (MOX/PTT only, from the C0 byte in the
+ * Protocol 1 stream - some SDR apps key PTT there even while using CAT
+ * for everything else). There used to be a third path, remote_execute(),
+ * a string-command shim hpsdr_p1.c called for frequency before hamlib.c
+ * existed; it's gone now that hamlib.c calls radio_tune_to() directly.
  *
  * radio_set_tx() is deliberately much smaller than sbitx's tr_switch():
  * sbitx interleaves the same two GPIO writes with ALSA mute calls,
@@ -47,9 +50,5 @@ void radio_tune_to(uint32_t f);
  * value — it always re-drives the GPIO lines, so callers that see state
  * on every poll (like hpsdr_p1.c) should only call it on a change. */
 void radio_set_tx(int tx_on);
-
-/* Parses one command string from a control surface (currently just
- * "freq NNN" from hpsdr_p1.c) and applies it. */
-void remote_execute(char *command);
 
 #endif /* RADIO_H */
