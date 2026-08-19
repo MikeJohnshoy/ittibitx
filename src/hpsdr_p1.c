@@ -260,23 +260,33 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
             if (start) {
                 int same_dest =
                     client_active &&
-                    sender->sin_addr.s_addr == stream_dest.sin_addr.s_addr;
-        
-                // keep forced 1024 if needed
-                struct sockaddr_in new_dest = *sender;
-                new_dest.sin_port = htons(HPSDR_PORT);
-        
+                    sender->sin_addr.s_addr == stream_dest.sin_addr.s_addr &&
+                    sender->sin_port        == stream_dest.sin_port;
+
+                // Reply to the sender's actual address:port, not a hardcoded
+                // HPSDR_PORT. That earlier "force 1024" was wrong: 1024 is
+                // where clients SEND commands to us, but they RECEIVE the
+                // EP6 IQ stream on the ephemeral port their own socket is
+                // bound to (the same port sender came from here) - almost
+                // always a different port than 1024. Forcing 1024 sent
+                // every IQ packet to a port nothing was listening on: no
+                // error (UDP sendto doesn't fail just because nobody's
+                // listening), just silently discarded IQ while the client
+                // sat there having successfully "started" a stream that
+                // never arrived. See src/hpsdr_p1.c in drexjj/sbitx (the
+                // known-working baseline this was ported from), which
+                // never overrides the port here.
                 if (!same_dest) {
-                    stream_dest = new_dest;
+                    stream_dest = *sender;
                     tx_seq = 0;
                     iq_buf_count = 0;
                     printf("hpsdr: streaming STARTED cmd=%u to %s:%d\n",
                            (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
                 } else {
                     // repeated START from same client: keep streaming, do not reset seq/buffer
-                    stream_dest = new_dest;   // refresh anyway
+                    stream_dest = *sender;   // refresh anyway
                 }
-        
+
                 client_active = 1;
             } else {
                 client_active = 0;
