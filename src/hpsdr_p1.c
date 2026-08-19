@@ -41,7 +41,7 @@ static pthread_t poll_thread;
 static double iq_buf_i[SAMPLES_PER_PACKET];
 static double iq_buf_q[SAMPLES_PER_PACKET];
 static int iq_buf_count = 0;
-static double hpsdr_iq_gain = 30.0;  // <<<<< add gain to I and Q data going out
+static double hpsdr_iq_gain = 1.0;  // <<<<< add gain to I and Q data going out
 
 extern void radio_set_tx(int tx_on);
 extern int freq_hdr;   // read-only here - hamlib.c's "F" command owns writing it
