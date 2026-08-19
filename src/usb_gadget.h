@@ -6,7 +6,7 @@
  * decimation, MOX debounce, TX IQ upsampling) built against sbitx's GTK app
  * — tx_on()/tx_off()/cmd_exec() and GLib's g_idle_add()/g_timeout_add() for
  * deferring T/R switches onto the GTK main thread. minibitx has none of
- * that (no GTK, no GLib main loop, radio_set_tx()/remote_execute() instead),
+ * that (no GTK, no GLib main loop, radio_set_tx()/radio_tune_to() instead),
  * so only this self-contained piece came across. It doesn't touch HPSDR
  * state, GTK, or any sBitx-specific control API — just ALSA and configfs —
  * so it drops in as its own module.
@@ -26,13 +26,13 @@
  *
  *   Sample delivery:
  *     minibitx's audio thread already produces baseband IQ at 48 kHz (see
- *     sound_process() / hpsdr_send_iq() in sound.c and hpsdr_p1.c — no
- *     decimation needed here, unlike sbitx's 96 kHz native rate).
- *     uac_push_iq() is called once per sample from hpsdr_send_iq() and
- *     writes packed 24-bit PCM frames to the ALSA loopback that the UAC2
- *     gadget reads. This runs independently of whether an HPSDR client is
- *     connected — USB audio and the HPSDR UDP stream are two separate
- *     consumers of the same IQ.
+ *     sound_process() in sound.c) — no decimation needed here, unlike
+ *     sbitx's 96 kHz native rate. uac_push_iq() is called once per sample
+ *     directly from sound_process(), the same place that hands the same
+ *     block to hpsdr_send_iq() (hpsdr_p1.c) as a separate copy. This runs
+ *     independently of whether an HPSDR client is connected — USB audio
+ *     and the HPSDR UDP stream are two separate consumers of the same IQ,
+ *     and neither module has a dependency on the other.
  *
  *   ALSA loopback bridge:
  *     Linux's snd-aloop module creates a pair of back-to-back PCM devices.
