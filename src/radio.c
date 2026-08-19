@@ -4,8 +4,6 @@
 #include "radio_hw.h"
 #include "si5351.h"
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <wiringPi.h>   // for delay() - relay-settling time, not GPIO access
 
 int freq_hdr = 7074000;
@@ -37,14 +35,4 @@ void radio_set_tx(int tx_on) {
         in_tx = 0;
         printf("TX off\n");
     }
-}
-
-// hpsdr_p1.c parses EP2 host commands and calls this to change frequency
-void remote_execute(char *command) {
-  if (strncmp(command, "freq ", 5) == 0) {
-    int f = atoi(command + 5);
-    if (f > 0) {
-      radio_tune_to(f);
-    }
-  }
 }
