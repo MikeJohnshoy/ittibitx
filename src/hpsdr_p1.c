@@ -152,8 +152,8 @@ static void build_and_send_packet(void)
                     if (abs(q) > max_q) max_q = abs(q);
                 }
             }
-            printf("EP6 seq=%u maxI=%d maxQ=%d firstI=%02X%02X%02X firstQ=%02X%02X%02X\n",
-               tx_seq - 1, max_i, max_q, pkt[16], pkt[17], pkt[18], pkt[19], pkt[20], pkt[21]);
+            //printf("EP6 seq=%u maxI=%d maxQ=%d firstI=%02X%02X%02X firstQ=%02X%02X%02X\n",
+               //tx_seq - 1, max_i, max_q, pkt[16], pkt[17], pkt[18], pkt[19], pkt[20], pkt[21]);
         }
         sendto(hpsdr_sock, pkt, sizeof(pkt), 0,
                (struct sockaddr *)&stream_dest, sizeof(stream_dest));
