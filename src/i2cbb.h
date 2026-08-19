@@ -4,20 +4,23 @@
  * Based on Mark Wyborski's work, re-written for C by Ashhar Farhan, VU2ESE
  */
 
-void i2cbb_init(uint8_t pin_number_sda, uint8_t pin_number_scl);
+// Opens the given Linux I2C bus (the number after "i2c-" as shown by
+// `i2cdetect -l`, e.g. 22) via the kernel's i2c-dev interface. Replaces
+// the old two-GPIO-pin-number bit-banging init - see i2cbb.c for why.
+void i2cbb_init(int i2c_bus_number);
 
-// This executes the SMBus “write byte” protocol, returning negative errno else zero on success.
+// This executes the SMBus "write byte" protocol, returning negative errno else zero on success.
 int32_t i2cbb_write_byte_data(uint8_t i2c_address, uint8_t command, uint8_t value);
 
-// This executes the SMBus “read byte” protocol, returning negative errno 
+// This executes the SMBus "read byte" protocol, returning negative errno 
 // else a data byte received from the device.
 int32_t i2cbb_read_byte_data(uint8_t i2c_address, uint8_t command);
 
-// This executes the SMBus “block write” protocol, returning negative errno else zero on success.
+// This executes the SMBus "block write" protocol, returning negative errno else zero on success.
 int32_t i2cbb_write_i2c_block_data (uint8_t i2c_address, uint8_t command, uint8_t length, 
 	const uint8_t * values);
 
-// This executes the SMBus “block read” protocol, returning negative errno else the number
+// This executes the SMBus "block read" protocol, returning negative errno else the number
 // of data bytes in the slave's response.
 int32_t i2cbb_read_i2c_block_data (uint8_t i2c_address, uint8_t command, uint8_t length, uint8_t* values);
 
