@@ -4,6 +4,7 @@
 #include "sound.h"
 #include "radio.h"
 #include "hpsdr_p1.h"
+#include "usb_gadget.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -239,6 +240,12 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
   }
 #endif
 
+  // sound_process() concludes here by handing the block's IQ to each
+  // consumer as its own copy - hpsdr_p1.c (network) and usb_gadget.c
+  // (USB Audio Class gadget) don't know about each other, and either can
+  // be active without the other.
+  for (int n = 0; n < n_samples; n++)
+    uac_push_iq(i_samples[n], q_samples[n]);
   hpsdr_send_iq(i_samples, q_samples, n_samples);
 
   // keep local outputs silent
