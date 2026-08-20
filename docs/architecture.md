@@ -47,9 +47,7 @@ before the signal leaves the Pi as baseband I/Q.
   hpsdr_p1.c (HPSDR/UDP)   usb_gadget.c (USB Audio Class)
 ```
 
-Two mixer stages, two si5351 clocks, two different jobs. Getting the two
-clocks' roles backwards — or forwards, into each other's — is exactly what
-went wrong three separate times (see "Bugs found in this chain" below).
+Two mixer stages, two si5351 clocks, two different jobs. 
 
 ## Stage by stage
 
