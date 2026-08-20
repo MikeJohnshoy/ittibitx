@@ -1,26 +1,23 @@
 /*
- * radio.h — minibitx's tuning/control glue.
+ * radio.h - minibitx's tuning/control glue.
  *
  * This ties the hardware primitives (radio_hw.c: oscillator via si5351v2.c,
  * LPF switching, T/R relay and PTT GPIO) together with the software
  * receive VFO (vfo.c, which is DSP, not hardware) under radio_tune_to()
- * and radio_set_tx(), and exposes them as the entry points every control
- * surface drives the radio through - never a second place that pokes
- * hardware directly.
+ * and radio_set_tx(), and exposes remote_execute() as the single entry
+ * point external control surfaces use to drive the radio.
  *
- * Two callers today: hamlib.c's rigctld-compatible server (f/F for
- * frequency, t/T for PTT - the sole frequency control surface) and
- * hpsdr_p1.c's EP2 command parser (MOX/PTT only, from the C0 byte in the
- * Protocol 1 stream - some SDR apps key PTT there even while using CAT
- * for everything else). There used to be a third path, remote_execute(),
- * a string-command shim hpsdr_p1.c called for frequency before hamlib.c
- * existed; it's gone now that hamlib.c calls radio_tune_to() directly.
+ * Today remote_execute() is called only from the HPSDR command parser
+ * (hpsdr_p1.c), which also calls radio_set_tx() directly on MOX changes.
+ * When Hamlib/rigctld support is added, it becomes a second caller into
+ * the same functions here rather than a second place that pokes hardware
+ * directly.
  *
  * radio_set_tx() is deliberately much smaller than sbitx's tr_switch():
  * sbitx interleaves the same two GPIO writes with ALSA mute calls,
  * mute_count/FFT-state resets, and AGC/volume restoration because it has
  * a full duplex-capable DSP chain to coordinate with. minibitx has no TX
- * audio path yet — it only streams RX IQ out over HPSDR — so there is no
+ * audio path yet - it only streams RX IQ out over HPSDR - so there is no
  * such state to coordinate. radio_set_tx() keeps just the hardware
  * sequencing (PTT before the relay on key-down, relay before PTT-off on
  * key-up, with the same relay-settling delays) since that's a property of
@@ -35,18 +32,22 @@
 #include <stdint.h>
 #include "vfo.h"
 
-// Fixed low IF (Hz) the analog front end mixes every RF frequency down to.
-// si5351bx_setfreq() is what actually selects the operating RF frequency,
-// by retuning the hardware LO so the desired signal lands here; the
-// software RX oscillator (lo, below) always demodulates this same fixed
-// value down to baseband and must never be retuned to the RF frequency
-// itself - see radio_tune_to() in radio.c.
-#define RX_IF_HZ 24000
-
 extern int freq_hdr;    // current frequency, Hz
 extern int in_tx;       // 0 = RX, 1 = TX
 extern int bfo_freq;    // center frequency of the crystal filter, Hz
-extern struct vfo lo;   // software LO for RX quadrature mixing - fixed at RX_IF_HZ
+extern struct vfo lo;   // software LO for RX quadrature mixing
+
+/* The analog front end's first mixer (si5351bx_setfreq(2, ...) in
+ * radio_tune_to()) always tracks the RF dial frequency so the desired
+ * signal lands at this same fixed IF, regardless of what's tuned - see
+ * sbitx.c's rx_osc_freq_for_mode(): "The IF center is at 24000 Hz ... We
+ * always mix at +24000 Hz to bring the IF down to baseband." The
+ * software RX VFO's only job is to cancel that fixed offset, so it must
+ * always be started at this frequency, never at the RF dial frequency
+ * (freq_hdr) - the latter was a bug (see radio_tune_to()). sbitx varies
+ * this per-mode for CW pitch; minibitx has no mode/CW handling, so it's
+ * just the plain USB/LSB/DIGITAL default. */
+#define RX_IF_FREQ_HZ 24000
 
 /* Tunes to f (Hz): sets the si5351 oscillator, restarts the software RX
  * VFO, and selects the matching LPF. */
@@ -55,8 +56,12 @@ void radio_tune_to(uint32_t f);
 /* Switches between receive (tx_on = 0) and transmit (tx_on = 1): drives
  * EXT_PTT and TX_LINE in the correct order with a relay-settling delay
  * between them, and updates in_tx. Safe to call repeatedly with the same
- * value — it always re-drives the GPIO lines, so callers that see state
+ * value - it always re-drives the GPIO lines, so callers that see state
  * on every poll (like hpsdr_p1.c) should only call it on a change. */
 void radio_set_tx(int tx_on);
+
+/* Parses one command string from a control surface (currently just
+ * "freq NNN" from hpsdr_p1.c) and applies it. */
+void remote_execute(char *command);
 
 #endif /* RADIO_H */
