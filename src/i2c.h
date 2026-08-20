@@ -1,5 +1,4 @@
-/*
- * i2c.h
+/* i2c.h
  *
  * Kernel-backed I2C access (via /dev/i2c-N and the standard SMBus ioctls)
  * for the si5351 clock generator and the INA260 power monitor. Originally
