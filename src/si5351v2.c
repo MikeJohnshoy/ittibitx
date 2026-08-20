@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <linux/types.h>
 #include <stdint.h>
-#include <wiringPi.h>
+#include <unistd.h>     // usleep()
 #include "i2cbb.h"
 #include "si5351.h"
 
@@ -77,7 +77,7 @@ void i2cSendRegister(uint8_t reg, uint8_t val){
              "- check SDA/SCL pull-ups and wiring\n", reg, attempts);
       return;   // give up on this write rather than hang forever
     }
-    delay(1);
+    usleep(1000);
   }
 }
 
@@ -268,9 +268,9 @@ void si5351_set_calibration(int32_t cal){
 
 void si5351bx_init(){
   i2cbb_init(SI5351_I2C_BUS);
-	delay(10);
+	usleep(10000);
   si5351_reset();
-	delay(10);
+	usleep(10000);
   si5351a_clkoff(SI_CLK0_CONTROL);
   si5351a_clkoff(SI_CLK1_CONTROL);
   si5351a_clkoff(SI_CLK2_CONTROL);
@@ -278,7 +278,6 @@ void si5351bx_init(){
 
 /*
 void main(int argc, char **argv){
-	wiringPiSetup();
   si5351bx_init();
   //si5351bx_setfreq(0, 27000000);
   si5351bx_setfreq(2, 27030000);
