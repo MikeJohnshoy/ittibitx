@@ -13,8 +13,17 @@ struct vfo lo;
 
 void radio_tune_to(uint32_t f) {
     freq_hdr = f;
-    si5351bx_setfreq(2, f + bfo_freq - 24000);
-    vfo_start(&lo, freq_hdr, lo.phase);
+    si5351bx_setfreq(2, f + bfo_freq - RX_IF_HZ);
+    // The software RX oscillator always demodulates the fixed low IF, not
+    // the RF frequency - only the hardware LO above moves when tuning.
+    // This used to pass freq_hdr here instead of RX_IF_HZ: on top of being
+    // the wrong frequency architecturally (matching sbitx's radio_tune_to(),
+    // which never touches the software oscillator at all - see sbitx.c's
+    // update_rx_osc(), called only on mode/pitch changes), freq_hdr is tens
+    // of MHz, and vfo_start()'s frequency_hz * 65536 overflows a 32-bit int
+    // at anything above ~32 kHz - so every retune was both conceptually
+    // wrong and numerically garbage. RX_IF_HZ (24000) does neither.
+    vfo_start(&lo, RX_IF_HZ, lo.phase);
     set_lpf_40mhz(f);    // enable the correct LPF for this band
     printf("Tuned to: %d Hz\n", f);
 }
