@@ -34,7 +34,7 @@ before the signal leaves the Pi as baseband I/Q.
   Low IF, fixed at RX_IF_HZ (24000 Hz)
      |
      v
-  ADC / audio codec (sound.c, 48 kHz sample rate)
+  ADC / wm8731 audio codec (sound.c, 48 kHz sample rate)
      |
      v
   Software VFO (vfo.c, "lo" in radio.c) <--- FIXED at RX_IF_HZ, never swept
@@ -84,7 +84,10 @@ the job of bringing the *desired* signal to that same fixed `bfo_freq`
 point — Mixer 2 only has to undo the fixed offset, not track the tuning.
 
 **ADC / audio codec.** `sound.c` opens the ALSA capture device at 48 kHz
-and hands each block of raw samples to `sound_process()`. What arrives here
+and hands each block of raw samples to `sound_process()`. brought up via
+the dtoverlay=audioinjector-wm8731-audio.  That kernel driver does the actual
+I2C register writes to the WM8731 (input mux, gain, mute, etc.) itself;
+minibitx only ever reaches it indirectly,What arrives here
 is the low IF signal — real-valued, centered around `RX_IF_HZ`, not yet
 I/Q.
 
