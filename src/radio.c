@@ -4,7 +4,7 @@
 #include "radio_hw.h"
 #include "si5351.h"
 #include <stdio.h>
-#include <wiringPi.h>   // for delay() - relay-settling time, not GPIO access
+#include <unistd.h>     // usleep() - relay-settling time, not GPIO access
 
 int freq_hdr = 7074000;
 int in_tx = 0;
@@ -34,12 +34,12 @@ void radio_set_tx(int tx_on) {
     if (tx_on) {
         in_tx = 1;                  // mirrors sbitx: hardware state follows intent
         radio_hw_set_ptt(1);
-        delay(20);                  // let PTT assert before keying the relay
+        usleep(20000);              // let PTT assert before keying the relay
         radio_hw_set_tx_relay(1);
         printf("TX on\n");
     } else {
         radio_hw_set_ptt(0);
-        delay(5);                   // let the relay settle before dropping PTT
+        usleep(5000);               // let the relay settle before dropping PTT
         radio_hw_set_tx_relay(0);
         in_tx = 0;
         printf("TX off\n");
