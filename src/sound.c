@@ -4,7 +4,6 @@
 #include "sound.h"
 #include "radio.h"
 #include "hpsdr_p1.h"
-#include "usb_gadget.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -203,10 +202,12 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
 
     if (!vfo_ready) {
       vfo_init_phase_table();
-      // Fixed low IF, not freq_hdr - see RX_IF_HZ in radio.h. radio_tune_to()
-      // keeps lo at this same fixed frequency on every retune; only the
-      // hardware LO (si5351bx_setfreq) actually moves with freq_hdr.
-      vfo_start(&lo, RX_IF_HZ, 0);
+      // Must match RX_IF_FREQ_HZ, the fixed IF radio_tune_to() targets
+      // (see radio.h) - not freq_hdr, the RF dial frequency. This lazy
+      // init only matters if sound_process() is ever called before
+      // main()'s own startup vfo_start()/radio_tune_to(); it used to
+      // silently reintroduce the freq_hdr bug in that case.
+      vfo_start(&lo, RX_IF_FREQ_HZ, 0);
       vfo_ready = 1;
     }
 
@@ -243,12 +244,6 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
   }
 #endif
 
-  // sound_process() concludes here by handing the block's IQ to each
-  // consumer as its own copy - hpsdr_p1.c (network) and usb_gadget.c
-  // (USB Audio Class gadget) don't know about each other, and either can
-  // be active without the other.
-  for (int n = 0; n < n_samples; n++)
-    uac_push_iq(i_samples[n], q_samples[n]);
   hpsdr_send_iq(i_samples, q_samples, n_samples);
 
   // keep local outputs silent
