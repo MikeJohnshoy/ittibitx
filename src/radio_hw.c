@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <wiringPi.h>
-#include "i2cbb.h"
+#include "i2c.h"
 #include "radio_hw.h"
 
 #define DEBUG 0
@@ -49,7 +49,7 @@ int radio_hw_gpio_init(void)
 int radio_hw_detect_version(void)
 {
 	uint8_t response[4];
-	if (i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
+	if (i2c_read_i2c_block_data(0x8, 0, 4, response) == -1)
 		return SBITX_DE;
 	else
 		return SBITX_V2;
@@ -115,7 +115,7 @@ void read_voltage_current(float *voltage, float *current)
 	uint8_t data_buffer[2]; // Buffer to hold raw register data
 
 	// Explicitly set the register pointer to the voltage register
-	if (i2cbb_write_i2c_block_data(INA260_ADDRESS, VOLTAGE_REGISTER, 0, NULL) < 0)
+	if (i2c_write_i2c_block_data(INA260_ADDRESS, VOLTAGE_REGISTER, 0, NULL) < 0)
 	{
 		printf("Error setting voltage register pointer\n");
 		*voltage = 0.0f;
@@ -124,7 +124,7 @@ void read_voltage_current(float *voltage, float *current)
 	}
 
 	// Read the voltage register (2 bytes)
-	int e = i2cbb_read_i2c_block_data(INA260_ADDRESS, VOLTAGE_REGISTER, 2, data_buffer);
+	int e = i2c_read_i2c_block_data(INA260_ADDRESS, VOLTAGE_REGISTER, 2, data_buffer);
 	if (e != 2)
 	{
 		printf("Error reading voltage register\n");
@@ -136,7 +136,7 @@ void read_voltage_current(float *voltage, float *current)
 	*voltage = raw_voltage * 1.25e-3f; // Convert to volts (1.25 mV per LSB)
 
 	// Explicitly set the register pointer to the current register
-	if (i2cbb_write_i2c_block_data(INA260_ADDRESS, CURRENT_REGISTER, 0, NULL) < 0)
+	if (i2c_write_i2c_block_data(INA260_ADDRESS, CURRENT_REGISTER, 0, NULL) < 0)
 	{
 		printf("Error setting current register pointer\n");
 		*voltage = 0.0f;
@@ -145,7 +145,7 @@ void read_voltage_current(float *voltage, float *current)
 	}
 
 	// Read the current register (2 bytes)
-	e = i2cbb_read_i2c_block_data(INA260_ADDRESS, CURRENT_REGISTER, 2, data_buffer);
+	e = i2c_read_i2c_block_data(INA260_ADDRESS, CURRENT_REGISTER, 2, data_buffer);
 	if (e != 2)
 	{
 		printf("Error reading current register\n");
@@ -173,7 +173,7 @@ int radio_hw_ina260_configure(void)
 		(uint8_t)(CONFIG_DEFAULT >> 8),  // MSB
 		(uint8_t)(CONFIG_DEFAULT & 0xFF) // LSB
 	};
-	if (i2cbb_write_i2c_block_data(INA260_ADDRESS, CONFIG_REGISTER, 2, config_data) < 0)
+	if (i2c_write_i2c_block_data(INA260_ADDRESS, CONFIG_REGISTER, 2, config_data) < 0)
 		return -1;
 	return 0;
 }
