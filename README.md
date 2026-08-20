@@ -1,7 +1,7 @@
 # minibitx    -- an experimental test bed
 PROJECT STATUS: Currently trying to get it working in receive mode only.
 
-DESCRIPTION:  Minimal set of code to initialize sbitx hardware and allow external SDR software (like quisk or SDRConsole) to connect and use the radio.  It runs on the rpi board in your sbitx as an alternative to the 'sbitx' software that came with the radio.  It provides no user interface at all (other than minimal messages on the console used to start minibitx). I started by looking at the big files making up the sbitx system, and asking what is the minimum set of code I need to preserve to allow external SDR apps to run. Of course I am tempted to keep putting more and more back in, but I'm showing some restraint.
+DESCRIPTION:  Minimal set of code to initialize sbitx hardware and allow external SDR software (like quisk or SDRConsole) to connect and use the radio hardware.  It runs on the rpi board in your sbitx as an alternative to the 'sbitx' software that came with the radio.  It provides no user interface at all (other than minimal messages on the console used to start minibitx) - the external SDR software provides all the processing needed for receive and transmit functions. I started by looking at the large files making up the sbitx system, and asking what is the minimum set of code I need to preserve to allow external SDR apps to run. 
 
 •	main() (src/minibitx.c) brings up the pieces in order: GPIO/hardware init, the oscillator and software RX VFO, the network thread (hpsdr_poll), the audio codec, and the audio thread (sound_thread_start). It does no hardware or protocol work itself.
 
