@@ -21,8 +21,8 @@
  * later, Hamlib's PTT command actually call.
  *
  * As in sbitx, the local oscillator (si5351v2.c/si5351.h) and the I2C bus
- * driver (i2cbb.c/i2cbb.h) are left as their own single-purpose files and
- * are not folded into this one — this file calls into i2cbb.c the same
+ * driver (i2c.c/i2c.h) are left as their own single-purpose files and
+ * are not folded into this one — this file calls into i2c.c the same
  * way higher-level control code will eventually call into this file.
  */
 
