@@ -1,6 +1,5 @@
-/* i2cbb.c
- *
- * I2C access for the si5351 (and, eventually, the board-ID
+/*
+ * i2c.c - I2C access for the si5351 (and, once wired in, the board-ID
  * EEPROM and INA260 power monitor).
  *
  * This used to bit-bang I2C directly over GPIO from userspace. That
@@ -18,9 +17,12 @@
  *
  * The four public read/write functions keep their original signatures
  * and SMBus-style semantics, so si5351v2.c and radio_hw.c did not need
- * to change - only i2cbb_init()'s argument changed, from two GPIO pin
- * numbers to one Linux I2C bus number (the number after "i2c-" in
- * `i2cdetect -l`, e.g. 22 on this board).
+ * to change beyond the rename below - only i2c_init()'s argument changed,
+ * from two GPIO pin numbers to one Linux I2C bus number (the number after
+ * "i2c-" in `i2cdetect -l`, e.g. 22 on this board). This file and its
+ * functions were originally named "i2cbb" (I2C bit-banging); renamed to
+ * "i2c" once the bit-banging was gone, so the name matches what the code
+ * actually does.
  *
  * This intentionally hand-rolls the SMBus ioctl calls instead of linking
  * against libi2c (`-li2c`), which may not be installed - only the kernel
@@ -37,18 +39,18 @@
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
 #include <linux/i2c.h>
-#include "i2cbb.h"
+#include "i2c.h"
 
 static int i2c_fd = -1;
 
-void i2cbb_init(int i2c_bus_number)
+void i2c_init(int i2c_bus_number)
 {
 	char path[32];
 	snprintf(path, sizeof(path), "/dev/i2c-%d", i2c_bus_number);
 
 	i2c_fd = open(path, O_RDWR);
 	if (i2c_fd < 0) {
-		printf("i2cbb: failed to open %s: %s - I2C calls will fail\n",
+		printf("i2c: failed to open %s: %s - I2C calls will fail\n",
 		       path, strerror(errno));
 	}
 }
@@ -75,14 +77,14 @@ static int i2c_smbus_xfer(uint8_t addr, uint8_t read_write, uint8_t command,
 }
 
 // This executes the SMBus "write byte" protocol, returning negative errno else zero on success.
-int32_t i2cbb_write_byte_data(uint8_t i2c_address, uint8_t command, uint8_t value)
+int32_t i2c_write_byte_data(uint8_t i2c_address, uint8_t command, uint8_t value)
 {
 	union i2c_smbus_data data;
 	data.byte = value;
 
 	if (i2c_smbus_xfer(i2c_address, I2C_SMBUS_WRITE, command,
 	                    I2C_SMBUS_BYTE_DATA, &data) < 0) {
-		printf("i2cbb: write byte failed (addr 0x%02x, reg 0x%02x): %s\n",
+		printf("i2c: write byte failed (addr 0x%02x, reg 0x%02x): %s\n",
 		       i2c_address, command, strerror(errno));
 		return -1;
 	}
@@ -90,13 +92,13 @@ int32_t i2cbb_write_byte_data(uint8_t i2c_address, uint8_t command, uint8_t valu
 }
 
 // This executes the SMBus "read byte" protocol, returning negative errno else a data byte received from the device.
-int32_t i2cbb_read_byte_data(uint8_t i2c_address, uint8_t command)
+int32_t i2c_read_byte_data(uint8_t i2c_address, uint8_t command)
 {
 	union i2c_smbus_data data;
 
 	if (i2c_smbus_xfer(i2c_address, I2C_SMBUS_READ, command,
 	                    I2C_SMBUS_BYTE_DATA, &data) < 0) {
-		printf("i2cbb: read byte failed (addr 0x%02x, reg 0x%02x): %s\n",
+		printf("i2c: read byte failed (addr 0x%02x, reg 0x%02x): %s\n",
 		       i2c_address, command, strerror(errno));
 		return -1;
 	}
@@ -104,7 +106,7 @@ int32_t i2cbb_read_byte_data(uint8_t i2c_address, uint8_t command)
 }
 
 // This executes the SMBus "block write" protocol, returning negative errno else zero on success.
-int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t length,
+int32_t i2c_write_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t length,
         const uint8_t * values)
 {
 	if (length == 0) {
@@ -114,7 +116,7 @@ int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t
 		union i2c_smbus_data data; // unused for I2C_SMBUS_BYTE
 		if (i2c_smbus_xfer(i2c_address, I2C_SMBUS_WRITE, command,
 		                    I2C_SMBUS_BYTE, &data) < 0) {
-			printf("i2cbb: address/command failed (addr 0x%02x, reg 0x%02x): %s\n",
+			printf("i2c: address/command failed (addr 0x%02x, reg 0x%02x): %s\n",
 			       i2c_address, command, strerror(errno));
 			return -1;
 		}
@@ -122,7 +124,7 @@ int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t
 	}
 
 	if (length > I2C_SMBUS_BLOCK_MAX) {
-		printf("i2cbb: block write length %d exceeds max %d\n",
+		printf("i2c: block write length %d exceeds max %d\n",
 		       length, I2C_SMBUS_BLOCK_MAX);
 		return -1;
 	}
@@ -133,7 +135,7 @@ int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t
 
 	if (i2c_smbus_xfer(i2c_address, I2C_SMBUS_WRITE, command,
 	                    I2C_SMBUS_I2C_BLOCK_DATA, &data) < 0) {
-		printf("i2cbb: block write failed (addr 0x%02x, reg 0x%02x, len %d): %s\n",
+		printf("i2c: block write failed (addr 0x%02x, reg 0x%02x, len %d): %s\n",
 		       i2c_address, command, length, strerror(errno));
 		return -1;
 	}
@@ -142,11 +144,11 @@ int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t
 
 // This executes the SMBus "block read" protocol, returning negative errno else the number
 // of data bytes in the slave's response.
-int32_t i2cbb_read_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t length,
+int32_t i2c_read_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t length,
         uint8_t* values)
 {
 	if (length == 0 || length > I2C_SMBUS_BLOCK_MAX) {
-		printf("i2cbb: block read length %d out of range\n", length);
+		printf("i2c: block read length %d out of range\n", length);
 		return -1;
 	}
 
@@ -155,7 +157,7 @@ int32_t i2cbb_read_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t 
 
 	if (i2c_smbus_xfer(i2c_address, I2C_SMBUS_READ, command,
 	                    I2C_SMBUS_I2C_BLOCK_DATA, &data) < 0) {
-		printf("i2cbb: block read failed (addr 0x%02x, reg 0x%02x, len %d): %s\n",
+		printf("i2c: block read failed (addr 0x%02x, reg 0x%02x, len %d): %s\n",
 		       i2c_address, command, length, strerror(errno));
 		return -1;
 	}
