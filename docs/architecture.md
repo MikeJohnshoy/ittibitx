@@ -1,0 +1,169 @@
+# minibitx RF signal chain
+
+This documents the receive signal path from antenna to baseband I/Q — the
+part that's easy to get wrong, because most of it lives in analog hardware
+and a fixed relationship between two si5351 clocks that isn't obvious from
+reading any single source file. Three separate bugs in this chain shipped
+and shadowed each other before being found by diffing against
+[drexjj/sbitx](https://github.com/drexjj/sbitx), the working codebase
+minibitx was carved down from; the last section of this document records
+them so they don't get reintroduced.
+
+minibitx has no onboard demodulation, no waterfall, no mode logic — the
+connected SDR app does all of that. This document only covers what happens
+before the signal leaves the Pi as baseband I/Q.
+
+## The chain, end to end
+
+```
+  Antenna
+     |
+     v
+  LPF bank (radio_hw.c: set_lpf_40mhz, one of 4 relays by band)
+     |
+     v
+  Mixer 1  <---  clk2, si5351 RX LO (SWEEPS with tuning)
+     |            radio.c: si5351bx_setfreq(2, f + bfo_freq - RX_IF_HZ)
+     v
+  Crystal filter, fixed at bfo_freq (~40.035 MHz)
+     |
+     v
+  Mixer 2  <---  clk1, si5351 BFO (FIXED, never swept)
+     |            minibitx.c: si5351bx_setfreq(1, bfo_freq), once at startup
+     v
+  Low IF, fixed at RX_IF_HZ (24000 Hz)
+     |
+     v
+  ADC / audio codec (sound.c, 48 kHz sample rate)
+     |
+     v
+  Software VFO (vfo.c, "lo" in radio.c) <--- FIXED at RX_IF_HZ, never swept
+     |            sound.c: sound_process() calls vfo_read_iq() per sample
+     v
+  Baseband I/Q (centered at 0 Hz)
+     |
+     +---------------------------+
+     v                           v
+  hpsdr_p1.c (HPSDR/UDP)   usb_gadget.c (USB Audio Class)
+```
+
+Two mixer stages, two si5351 clocks, two different jobs. Getting the two
+clocks' roles backwards — or forwards, into each other's — is exactly what
+went wrong three separate times (see "Bugs found in this chain" below).
+
+## Stage by stage
+
+**LPF bank.** `radio_hw.c`'s `set_lpf_40mhz(frequency)` selects one of four
+low-pass filter relays (`LPF_A`–`LPF_D`) based on the tuned frequency —
+under 5.5 MHz, under 10.5 MHz, under 18.5 MHz, or under 30 MHz — and is a
+no-op if the frequency falls in the same band as the last call. Pure analog
+front-end filtering; nothing here talks to either si5351 clock.
+
+**Mixer 1 — the RX LO (clk2), which sweeps with tuning.** This is the only
+clock that moves when you retune. `radio_tune_to(f)` in `radio.c` sets it
+with `si5351bx_setfreq(2, f + bfo_freq - RX_IF_HZ)` — mixing the desired RF
+frequency `f` up to a fixed intermediate frequency at `bfo_freq`
+(40,035,000 Hz). Whatever `f` you tune to, the output of this stage always
+lands at the same fixed IF; that's the whole point of a superheterodyne
+front end, and it's also *why* nothing downstream of this stage needs to
+know the current operating frequency.
+
+**Crystal filter.** A fixed bandpass filter centered at `bfo_freq`. This is
+the receiver's actual selectivity — everything outside its passband is
+rejected before the signal ever reaches Mixer 2. minibitx does no
+mode-dependent filtering of its own (no CW/SSB bandwidth switching); the
+connected SDR app is expected to do any further filtering digitally on the
+IQ it receives.
+
+**Mixer 2 — the BFO (clk1), which is fixed and started once.** This mixer
+brings the crystal-filter output (still up at ~40 MHz) down to a low IF of
+`RX_IF_HZ` (24000 Hz) that the audio codec can actually sample. Its LO is
+si5351 `clk1`, set once in `minibitx.c` at startup —
+`si5351bx_setfreq(1, bfo_freq)` — and never touched again for the life of
+the process. It does not sweep. It cannot sweep: it's fixed at `bfo_freq`
+regardless of what frequency you're tuned to, because Mixer 1 already did
+the job of bringing the *desired* signal to that same fixed `bfo_freq`
+point — Mixer 2 only has to undo the fixed offset, not track the tuning.
+
+**ADC / audio codec.** `sound.c` opens the ALSA capture device at 48 kHz
+and hands each block of raw samples to `sound_process()`. What arrives here
+is the low IF signal — real-valued, centered around `RX_IF_HZ`, not yet
+I/Q.
+
+**Software VFO — fixed at RX_IF_HZ, never swept.** `vfo.c` implements a
+digital NCO (`struct vfo`, the global `lo` in `radio.c`) that generates
+quadrature (cos/sin) mixing signals. `sound_process()` calls
+`vfo_read_iq()` once per sample and multiplies the incoming real IF sample
+by both the cosine and sine outputs, producing the I and Q channels — a
+standard digital quadrature downconversion, taking the fixed 24 kHz IF down
+to baseband (0 Hz). Like the BFO, this oscillator's frequency is fixed at
+`RX_IF_HZ` and does not change when you retune; only its *phase* is
+preserved across calls; see `RX_IF_HZ` in `radio.h` for the single place
+this constant is defined.
+
+**Baseband I/Q → the two streaming consumers.** `sound_process()` concludes
+by handing its I/Q arrays to `hpsdr_send_iq()` (`hpsdr_p1.c`, packetized as
+HPSDR Protocol 1 over UDP) and `uac_push_iq()` (`usb_gadget.c`, streamed as
+a USB Audio Class 2.0 capture device) — two independent copies, neither
+module aware the other exists. See `README.md` for how those two files (and
+the rest of `src/`) are organized.
+
+## The control path
+
+`radio_tune_to(f)` in `radio.c` is the only function that changes what RF
+frequency the receiver is listening to, and it only ever touches two
+things: `clk2` (Mixer 1's LO, via `si5351bx_setfreq(2, ...)`) and the LPF
+bank (`set_lpf_40mhz(f)`). It does **not** touch `clk1` (the BFO) and does
+**not** change the software VFO's frequency — both stay fixed at their
+respective constants (`bfo_freq`, `RX_IF_HZ`) for the life of the process.
+`radio_tune_to()` is called from exactly two places: `minibitx.c` at
+startup, and `hamlib.c`'s rigctld-compatible `F` (set frequency) command —
+the sole live frequency control surface, per `radio.h`'s file comment.
+
+## TX
+
+Not implemented yet. `radio_set_tx()` in `radio.c` sequences the PTT and
+T/R relay GPIO lines, but there is no TX audio path — no upsampling, no
+TX IQ ring buffer, nothing feeding a modulator. See the comment in
+`radio.h` for what sbitx's much larger `tr_switch()` does that minibitx's
+`radio_set_tx()` deliberately doesn't (yet).
+
+## Bugs found in this chain (2026, this debugging session)
+
+Three separate, independent bugs stacked on top of each other in this
+exact chain, each masking whether the previous fix had worked. Recorded
+here so a future refactor doesn't wander back into any of them.
+
+1. **The software VFO was swept to the RF frequency instead of staying
+   fixed at `RX_IF_HZ`.** `radio_tune_to()` called
+   `vfo_start(&lo, freq_hdr, lo.phase)` — feeding the digital NCO the
+   *RF* tuning frequency (tens of MHz) instead of the fixed low IF. On top
+   of being architecturally backwards (see "Mixer 2" above), it silently
+   overflowed: `vfo_start()` computes `frequency_hz * 65536` in 32-bit
+   `int` arithmetic, which overflows for any input above ~32 kHz — so
+   every retune fed the mixer a numerically meaningless phase increment.
+   Symptom: `freq_hdr` (and so the frequency reported over HPSDR/rigctl)
+   updated correctly, but the actual downconverted spectrum didn't move.
+
+2. **The BFO (`clk1`) was never turned on.** `si5351bx_init()` explicitly
+   powers down all three si5351 clocks as its last step
+   (`si5351a_clkoff()` on CLK0/1/2). Only `clk2` was ever turned back on
+   (via `radio_tune_to()`); nothing anywhere started `clk1`. Without a BFO,
+   Mixer 2 has no LO to work with, so nothing gets downconverted from the
+   crystal-filter IF to `RX_IF_HZ` — the ADC just sees a noise floor.
+   Symptom: very low amplitude noise only, no recognizable CW/FT8/WWV, even
+   with bug 1 fixed. Fixed by starting `clk1` once at startup in
+   `minibitx.c`, matching `sbitx.c`'s `setup_oscillators()`.
+
+3. **(Downstream of this chain, not part of it, but found in the same
+   session)** `hpsdr_p1.c` forced the outbound UDP stream's destination
+   port to a hardcoded `HPSDR_PORT` (1024) instead of the connecting
+   client's actual source port. IQ was being computed correctly but sent
+   to a port nothing was listening on. See `hpsdr_p1.c`'s `handle_command()`
+   for the current, fixed version.
+
+All three were found by diffing against `drexjj/sbitx`'s equivalent code
+(`sbitx.c`'s `radio_tune_to()`/`setup_oscillators()`, `hpsdr_p1.c`) rather
+than by reasoning from first principles alone — when this chain misbehaves
+again, that repository is still the fastest way to check "does the working
+version do this differently."
