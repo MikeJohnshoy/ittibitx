@@ -41,11 +41,11 @@ int main(int argc, char **argv) {
   }
 
   // Initialize the si5351 clock generator (this also brings up the I2C
-  // bus it needs - see si5351v2.c) and the software RX VFO, then tune to
-  // the startup frequency.
+  // bus it needs - see si5351v2.c) and the software RX VFO's phase table,
+  // then tune to the startup frequency - radio_tune_to() starts the
+  // software oscillator itself, fixed at RX_IF_HZ (see radio.h).
   si5351bx_init();
   vfo_init_phase_table();
-  vfo_start(&lo, freq_hdr, 0);
   radio_tune_to(freq_hdr);
 
   // Initialize Networking (HPSDR Protocol 1)
