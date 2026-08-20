@@ -203,7 +203,10 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
 
     if (!vfo_ready) {
       vfo_init_phase_table();
-      vfo_start(&lo, freq_hdr, 0);
+      // Fixed low IF, not freq_hdr - see RX_IF_HZ in radio.h. radio_tune_to()
+      // keeps lo at this same fixed frequency on every retune; only the
+      // hardware LO (si5351bx_setfreq) actually moves with freq_hdr.
+      vfo_start(&lo, RX_IF_HZ, 0);
       vfo_ready = 1;
     }
 
