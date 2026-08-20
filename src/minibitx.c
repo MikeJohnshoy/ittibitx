@@ -41,13 +41,22 @@ int main(int argc, char **argv) {
   }
 
   // Initialize the si5351 clock generator (this also brings up the I2C
-  // bus it needs - see si5351v2.c) and the software RX VFO, then tune to
-  // the startup frequency.
+  // bus it needs - see si5351v2.c). si5351bx_init() explicitly powers
+  // down all three clocks, so clk1 - the BFO that drives the crystal
+  // filter's second mixer stage, fixed at bfo_freq - has to be started
+  // here; nothing else in minibitx ever touches clk1. Without it the RF
+  // front end has no LO for that stage, so the ADC sees noise instead of
+  // the actual downconverted signal - no CW/FT8/WWV, just a noise floor,
+  // even though clk2 (RX tuning) and the software IF mixing are both
+  // correct. Matches sbitx.c's setup_oscillators().
   si5351bx_init();
+  si5351bx_setfreq(1, bfo_freq);
+  si5351_reset();
+
+  // Then bring up the software RX VFO's phase table and tune to the
+  // startup frequency - radio_tune_to() starts the software oscillator
+  // itself, fixed at RX_IF_FREQ_HZ (see radio.h).
   vfo_init_phase_table();
-  // radio_tune_to() below immediately re-starts the software RX VFO at
-  // the correct fixed IF (RX_IF_FREQ_HZ - see radio.h), so this call
-  // just needs the phase table ready and lo in a valid state first.
   vfo_start(&lo, RX_IF_FREQ_HZ, 0);
   radio_tune_to(freq_hdr);
 
