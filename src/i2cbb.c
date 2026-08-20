@@ -1,5 +1,6 @@
-/*
- * i2cbb.c - I2C access for the si5351 (and, once wired in, the board-ID
+/* i2cbb.c
+ *
+ * I2C access for the si5351 (and, eventually, the board-ID
  * EEPROM and INA260 power monitor).
  *
  * This used to bit-bang I2C directly over GPIO from userspace. That
