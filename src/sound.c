@@ -15,7 +15,11 @@
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
-#define SAMPLE_RATE      48000
+// Must match vfo.c's sampling_freq - see its comment for why this is
+// 96000, not 48000: Nyquist needs headroom above the fixed 24kHz IF
+// (RX_IF_FREQ_HZ in radio.h) for the crystal filter's passband, or that
+// passband folds back onto itself into a mirror-symmetric spectrum.
+#define SAMPLE_RATE      96000
 #define CHANNELS         2        /* stereo: L = RX / R = Mic (capture) */
 #define PERIOD_FRAMES    1024     /* frames per period (matches old cfg) */
 #define MAX_FRAMES       4096
