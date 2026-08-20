@@ -8,7 +8,11 @@
 
 int freq_hdr = 7074000;
 int in_tx = 0;
-int bfo_freq = 40035000;
+// new data from Evan (AC9TU) indicates the  actual crystal filter 
+// center is at 40.0124 MHz. The prior value here (40.035 MHz) was 22.6kHz
+// off - so the desired signal was landing well off-center in the passband, not
+// symmetric on the 24kHz digital IF as radio_tune_to()'s math assumes.
+int bfo_freq = 40012400;    // old value was 40035000
 struct vfo lo;
 
 void radio_tune_to(uint32_t f) {
