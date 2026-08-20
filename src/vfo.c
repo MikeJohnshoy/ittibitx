@@ -8,7 +8,15 @@
 // we define one more lookup table entry than needed, so that each quadrant
 // has both endpoints of 90 degree range
 static int phase_table[MAX_PHASE_COUNT];
-int sampling_freq = 48000;    // changed from 96k in sBitx
+// Must match the real ADC capture rate (sound.c's SAMPLE_RATE) - this is
+// what vfo_start()'s phase-increment math uses to convert RX_IF_FREQ_HZ
+// into an actual NCO rate. 48000 here (down from sbitx's native 96000)
+// put Nyquist exactly on top of the fixed 24kHz IF, with zero headroom
+// for the crystal filter's passband - any real signal bandwidth around
+// that IF folded straight back onto itself, showing up as a mirror-
+// symmetric spectrum after mixing to baseband. 96000 restores the
+// headroom sbitx relies on for the same fixed IF.
+int sampling_freq = 96000;
 // the only time we call this trig function is when we initialize the table
 void vfo_init_phase_table() {
   for (int i = 0; i < MAX_PHASE_COUNT; i++) {
@@ -54,7 +62,7 @@ int vfo_read(struct vfo *v) {
 // provide both I (cosine) and Q (sine) outputs for quadrature mixing.
 // cosine is simply the sine shifted forward by 90 degrees (16384 phase counts).
 void vfo_read_iq(struct vfo *v, int *out_i, int *out_q) {
-  // I channel = cos(phase) = sin(phase + 90°)
+  // I channel = cos(phase) = sin(phase + 90 degrees)
   *out_i = vfo_lookup(v->phase + 16384);
   // Q channel = sin(phase)
   *out_q = vfo_lookup(v->phase);
