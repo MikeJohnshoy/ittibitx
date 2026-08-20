@@ -2,7 +2,7 @@
 #include <linux/types.h>
 #include <stdint.h>
 #include <unistd.h>     // usleep()
-#include "i2cbb.h"
+#include "i2c.h"
 #include "si5351.h"
 
 // The si5351 turned out to be wired to the same physical bus as this
@@ -60,7 +60,7 @@ static int i2c_error_count = 0;       // counts I2C Errors
 
 /*
 void i2cSendRegister(uint8_t reg, uint8_t* data, uint8_t n){
-  i2cbb_write_i2c_block_data (SI5351_ADDR, reg, n, data); 
+  i2c_write_i2c_block_data (SI5351_ADDR, reg, n, data);
 }
 */
 
@@ -68,7 +68,7 @@ void i2cSendRegister(uint8_t reg, uint8_t* data, uint8_t n){
 
 void i2cSendRegister(uint8_t reg, uint8_t val){
   int attempts = 0;
-  while (i2cbb_write_byte_data(SI5351_ADDR, reg, val) < 0)
+  while (i2c_write_byte_data(SI5351_ADDR, reg, val) < 0)
   {
     printf("Repeating I2C #%d\n",i2c_error_count++);  // reports number of I2C repeats caused by errors
     attempts++;
@@ -267,7 +267,7 @@ void si5351_set_calibration(int32_t cal){
 }
 
 void si5351bx_init(){
-  i2cbb_init(SI5351_I2C_BUS);
+  i2c_init(SI5351_I2C_BUS);
 	usleep(10000);
   si5351_reset();
 	usleep(10000);
