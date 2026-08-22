@@ -1,6 +1,4 @@
-/*
- * radio_hw.c — see radio_hw.h for scope. Ported from sbitx's radio_hw.c.
- */
+// radio_hw.c
 
 #include <stdio.h>
 #include <stdint.h>
