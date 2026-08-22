@@ -1,7 +1,8 @@
 // minibitx.c
+//
 // A tiny application that initializes the sbitx radio hardware,
 // and allows a remote SDR application to control its operation over the network using
-// a subset of openHPSDR Protocol 1.
+// a subset of openHPSDR Protocol 1 and/or HAMLIB / rigctl.
 //
 // Hardware control (GPIO/LPF/oscillator/codec) lives in radio_hw.c and
 // si5351v2.c; tuning/control glue lives in radio.c; audio capture and
@@ -21,10 +22,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-// Standard rigctld TCP port. See hamlib.h for why this exists: SDR
-// Console (and likely other clients) don't push live frequency changes
-// over the HPSDR link once streaming - this is the CAT-style control
-// surface they expect instead, running alongside it.
+// Standard rigctld TCP port
 #define HAMLIB_PORT 4532
 
 int main(int argc, char **argv) {
@@ -41,14 +39,10 @@ int main(int argc, char **argv) {
   }
 
   // Initialize the si5351 clock generator (this also brings up the I2C
-  // bus it needs - see si5351v2.c). si5351bx_init() explicitly powers
+  // bus it needs). si5351bx_init() explicitly powers
   // down all three clocks, so clk1 - the BFO that drives the crystal
   // filter's second mixer stage, fixed at bfo_freq - has to be started
-  // here; nothing else in minibitx ever touches clk1. Without it the RF
-  // front end has no LO for that stage, so the ADC sees noise instead of
-  // the actual downconverted signal - no CW/FT8/WWV, just a noise floor,
-  // even though clk2 (RX tuning) and the software IF mixing are both
-  // correct. Matches sbitx.c's setup_oscillators().
+  // here; nothing else in minibitx ever touches clk1.
   si5351bx_init();
   si5351bx_setfreq(1, bfo_freq);
   si5351_reset();
