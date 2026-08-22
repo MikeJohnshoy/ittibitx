@@ -1,30 +1,8 @@
-/*
- * radio_hw.h — radio hardware control for minibitx: boot-time GPIO setup,
- * LPF band switching, board-revision detection, and the INA260 power
- * monitor.
- *
- * This is a port of the radio_hw module code carved out of sbitx (LPF relays, 
- * TX_LINE/TX_POWER/EXT_PTT lines, the power/SWR bridge board,
- * the INA260 power monitor) is the same hardware so it makes
- * sense to bring the already-verified control code over wholesale rather
- * than re-derive a smaller subset.
- *
- * minibitx does not yet act on TX_POWER or the INA260 — there is no
- * battery-monitoring logic here today — but the GPIO lines are still
- * initialized to a safe idle state at boot, and the functions are
- * available for the control surfaces (HPSDR now, Hamlib next) to call
- * once that logic exists.
- *
- * radio_hw_set_ptt() / radio_hw_set_tx_relay() are the two GPIO
- * primitives behind PTT: radio_set_tx() in radio.c sequences them (with
- * the relay-settling delay between them) and is what HPSDR's MOX bit and,
- * later, Hamlib's PTT command actually call.
- *
- * As in sbitx, the local oscillator (si5351v2.c/si5351.h) and the I2C bus
- * driver (i2c.c/i2c.h) are left as their own single-purpose files and
- * are not folded into this one — this file calls into i2c.c the same
- * way higher-level control code will eventually call into this file.
- */
+// radio_hw.h
+//
+// radio hardware control for minibitx: boot-time GPIO setup,
+// LPF band switching, board-revision detection, and the INA260 power
+// monitor.
 
 #ifndef RADIO_HW_H
 #define RADIO_HW_H
