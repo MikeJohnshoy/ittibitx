@@ -237,7 +237,6 @@ static void set_freq_fixeddiv(int clk, int pll, uint32_t frequency, int divider,
   setup_multisynth(clk, pll, divider, 0, 1, SI_R_DIV_1, drive_strength);
 }
 
-
 void si5351bx_setfreq(uint8_t clk, uint32_t frequency){
   int pll;
 
@@ -261,7 +260,6 @@ void si5351bx_setfreq(uint8_t clk, uint32_t frequency){
 //		SI5351_CLK_DRIVE_STRENGTH_8MA);
 }
 
-
 void si5351_set_calibration(int32_t cal){
     xtal_freq_calibrated = cal;
 }
@@ -275,12 +273,3 @@ void si5351bx_init(){
   si5351a_clkoff(SI_CLK1_CONTROL);
   si5351a_clkoff(SI_CLK2_CONTROL);
 }
-
-/*
-void main(int argc, char **argv){
-  si5351bx_init();
-  //si5351bx_setfreq(0, 27000000);
-  si5351bx_setfreq(2, 27030000);
-  si5351bx_setfreq(1, 10000000);
-}
-*/
