@@ -1,15 +1,9 @@
-/* i2c.h
- *
- * Kernel-backed I2C access (via /dev/i2c-N and the standard SMBus ioctls)
- * for the si5351 clock generator and the INA260 power monitor. Originally
- * a GPIO bit-banging implementation ("i2cBitBangingBus.h" / "i2cbb.h",
- * based on Mark Wyborski's work, re-written for C by Ashhar Farhan,
- * VU2ESE) - see i2c.c for why it was replaced and renamed.
- */
+// i2c.h
+//
+// Kernel-backed I2C access (via /dev/i2c-N and the standard SMBus ioctls)
 
 // Opens the given Linux I2C bus (the number after "i2c-" as shown by
-// `i2cdetect -l`, e.g. 22) via the kernel's i2c-dev interface. Replaces
-// the old two-GPIO-pin-number bit-banging init - see i2c.c for why.
+// `i2cdetect -l`, e.g. 22) via the kernel's i2c-dev interface.
 void i2c_init(int i2c_bus_number);
 
 // This executes the SMBus "write byte" protocol, returning negative errno else zero on success.
