@@ -1,16 +1,15 @@
-/*
- * hamlib.h - minimal rigctld-compatible TCP control server.
- *
- * Implements a tiny subset of Hamlib's plain-text rigctld wire protocol 
- * for SDR apps that expect CAT-style live frequency control of an external 
- * radio over a separate connection from the HPSDR IQ and USB audio links.
- *
- * Implements: f/F (get/set frequency), t/T (get/set PTT), m/M (get/set
- * mode (cosmetic only, minibitx has no onboard demod), dump_state and chk_vfo
- * and q/Q to close a connection cleanly. Unknown commands
- * get a clean RPRT error reply rather than being silently ignored, so
- * a client never hangs waiting on us.
- */
+// hamlib.h - minimal rigctld-compatible TCP control server.
+//
+// Implements a tiny subset of Hamlib's plain-text rigctld wire protocol 
+
+// Implements: 
+//    f/F (get/set frequency)
+//    t/T (get/set PTT)
+//    m/M (get/set mode (cosmetic only, minibitx has no onboard demod)
+//    dump_state
+//    chk_vfo
+//    q/Q to close a connection cleanly
+// Unknown commands get a PRT error reply
 
 #ifndef HAMLIB_H
 #define HAMLIB_H
