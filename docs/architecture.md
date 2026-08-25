@@ -20,7 +20,7 @@ before the signal leaves the Pi as baseband I/Q.
   Mixer 1  <---  clk2, si5351 RX LO (SWEEPS with tuning)
      |            radio.c: si5351bx_setfreq(2, f + bfo_freq - RX_IF_HZ)
      v
-  Crystal filter, fixed at bfo_freq (~40.035 MHz, based on hardware spec review)
+  Crystal filter, fixed at bfo_freq (~40.0124 MHz, based on hardware spec review)
      |
      v
   Mixer 2  <---  clk1, si5351 BFO (FIXED, never swept, calculated to shift output
@@ -56,7 +56,7 @@ front-end filtering; nothing here talks to either si5351 clock.
 clock that moves when you retune. `radio_tune_to(f)` in `radio.c` sets it
 with `si5351bx_setfreq(2, f + bfo_freq - RX_IF_HZ)` — mixing the desired RF
 frequency `f` up to a fixed intermediate frequency at `bfo_freq`
-(40,035,000 Hz). Whatever `f` you tune to, the output of this stage always
+(40,012,400 Hz). Whatever `f` you tune to, the output of this stage always
 lands at the same fixed IF; that's the whole point of a superheterodyne
 front end, and it's also *why* nothing downstream of this stage needs to
 know the current operating frequency.
