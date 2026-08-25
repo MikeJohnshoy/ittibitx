@@ -8,7 +8,7 @@
 
 int freq_hdr = 7074000;
 int in_tx = 0;
-// ndata from Evan (AC9TU) indicates the  actual crystal filter 
+// hardware data from Evan (AC9TU) indicates the  actual crystal filter 
 // center is at 40.0124 MHz. The prior value here (40.035 MHz) was 22.6kHz
 // off - so the desired signal was landing well off-center in the passband, not
 // symmetric on the 24kHz digital IF as radio_tune_to()'s math assumes.
