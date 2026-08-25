@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <math.h>
 #include <alsa/asoundlib.h>
 
 /* ------------------------------------------------------------------ */
@@ -147,118 +146,53 @@ static int xrun_recover(snd_pcm_t *pcm, int err)
 /*  DSP, not hardware control: uses the software RX VFO (vfo.c) and    */
 /*  the tuning state owned by radio.c.                                 */
 /* ------------------------------------------------------------------ */
-// Debug/test toggles (set to 1 to enable). Default OFF: status_print()
-// (status.c) is the intended low-overhead console output now: these
-// per-block debug prints fire from the audio thread with no coordination
-// with it, and being unsynchronized on the same stdout, they collide with
-// its in-place redraw (no trailing newline) and garble both lines.
-#define IQ_TEST_TONE         0
-#define IQ_DEBUG_AUDIO_BLOCK 0
-#define IQ_DEBUG_MIX_BLOCK   0
-
 static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speaker,
-                   int32_t *output_tx, int n_samples) {
-  static double i_samples[4096];
-  static double q_samples[4096];
-  static int vfo_ready = 0;
+                           int32_t *output_tx, int n_samples) {
+    static double i_samples[4096];
+    static double q_samples[4096];
+    static int vfo_ready = 0;
 
-  // Runtime test switch (NO preprocessor confusion)
-  // 0 = normal RX->IQ path, 1 = synthetic tone path
-  static int force_tone = 0;
-
-  (void)input_mic;
-
-  if (n_samples > 4096) n_samples = 4096;
-
-#if IQ_DEBUG_AUDIO_BLOCK
-  // Audio input debug
-  {
-    static int dbg_blk = 0;
-    if ((dbg_blk++ % 200) == 0) {
-      int32_t minv = 2147483647, maxv = -2147483647;
-      for (int j = 0; j < n_samples; j++) {
-        if (input_rx[j] < minv) minv = input_rx[j];
-        if (input_rx[j] > maxv) maxv = input_rx[j];
-      }
-      printf("audio block n=%d min=%d max=%d first=%d\n",
-             n_samples, minv, maxv, input_rx[0]);
-    }
-  }
-#endif
-
-  if (force_tone) {
-    static int once_tone = 0;
-    if (!once_tone++) printf("### TONE PATH ACTIVE ###\n");
-
-    static double ph = 0.0;
-    for (int n = 0; n < n_samples; n++) {
-      ph += 2.0 * 3.141592653589793 * 1000.0 / 48000.0;
-      if (ph >= 2.0 * 3.141592653589793) ph -= 2.0 * 3.141592653589793;
-      i_samples[n] = 0.2 * sin(ph);
-      q_samples[n] = 0.2 * cos(ph);
-    }
-  } else {
-    static int once_norm = 0;
-    if (!once_norm++) printf("### NORMAL RX PATH ACTIVE ###\n");
+    (void)input_mic;
+    if (n_samples > 4096) n_samples = 4096;
 
     if (!vfo_ready) {
-      vfo_init_phase_table();
-      // Must match RX_IF_FREQ_HZ, the fixed IF radio_tune_to() targets
-      // (see radio.h) - not freq_hdr, the RF dial frequency. This lazy
-      // init only matters if sound_process() is ever called before
-      // main()'s own startup vfo_start()/radio_tune_to(); it used to
-      // silently reintroduce the freq_hdr bug in that case.
-      vfo_start(&lo, RX_IF_FREQ_HZ, 0);
-      vfo_ready = 1;
+        vfo_init_phase_table();
+        // Must match RX_IF_FREQ_HZ, the fixed IF radio_tune_to() targets
+        // (see radio.h) - not freq_hdr, the RF dial frequency. This lazy
+        // init only matters if sound_process() is ever called before
+        // main()'s own startup vfo_start()/radio_tune_to()
+        vfo_start(&lo, RX_IF_FREQ_HZ, 0);
+        vfo_ready = 1;
     }
 
     for (int n = 0; n < n_samples; n++) {
-      int32_t s = input_rx[n];
-      int lo_i, lo_q;
-      vfo_read_iq(&lo, &lo_i, &lo_q);
+        int32_t s = input_rx[n];
+        int lo_i, lo_q;
+        vfo_read_iq(&lo, &lo_i, &lo_q);
 
-      // S32 -> [-1, +1)
-      double rf = (double)s / 2147483648.0;
+        // S32 -> [-1, +1)
+        double rf = (double)s / 2147483648.0;
 
-      // Mix to IQ
-      i_samples[n] = rf * ((double)lo_i / 1073741824.0);
-      q_samples[n] = rf * ((double)lo_q / 1073741824.0);
+        // Mix to IQ
+        i_samples[n] = rf * ((double)lo_i / 1073741824.0);
+        q_samples[n] = rf * ((double)lo_q / 1073741824.0);
     }
-  }
 
-#if IQ_DEBUG_MIX_BLOCK
-  // Mixed IQ debug
-  {
-    static int dbg_mix = 0;
-    if ((dbg_mix++ % 200) == 0) {
-      double min_i =  1e9, max_i = -1e9;
-      double min_q =  1e9, max_q = -1e9;
-      for (int j = 0; j < n_samples; j++) {
-        if (i_samples[j] < min_i) min_i = i_samples[j];
-        if (i_samples[j] > max_i) max_i = i_samples[j];
-        if (q_samples[j] < min_q) min_q = q_samples[j];
-        if (q_samples[j] > max_q) max_q = q_samples[j];
-      }
-      printf("mix block n=%d I[min=% .6f max=% .6f] Q[min=% .6f max=% .6f]\n",
-             n_samples, min_i, max_i, min_q, max_q);
-    }
-  }
-#endif
+    // Hand the block's IQ to each consumer as its own copy - hpsdr_p1.c
+    // (network) and usb_gadget.c (USB Audio Class gadget) don't know about
+    // each other, and either can be active without the other. This call
+    // was dropped by an earlier cleanup that (correctly) removed a
+    // different, redundant push from this same file, but (incorrectly)
+    // took this one with it - untested until now, but meant to stay wired
+    // up alongside HPSDR/UDP, not replaced by it.
+    for (int n = 0; n < n_samples; n++)
+        uac_push_iq(i_samples[n], q_samples[n]);
 
-  // Hand the block's IQ to each consumer as its own copy - hpsdr_p1.c
-  // (network) and usb_gadget.c (USB Audio Class gadget) don't know about
-  // each other, and either can be active without the other. This call
-  // was dropped by an earlier cleanup that (correctly) removed a
-  // different, redundant push from this same file, but (incorrectly)
-  // took this one with it - untested until now, but meant to stay wired
-  // up alongside HPSDR/UDP, not replaced by it.
-  for (int n = 0; n < n_samples; n++)
-    uac_push_iq(i_samples[n], q_samples[n]);
-  hpsdr_send_iq(i_samples, q_samples, n_samples);
+    hpsdr_send_iq(i_samples, q_samples, n_samples);
 
-  // keep local outputs silent
-  memset(output_speaker, 0, n_samples * sizeof(int32_t));
-  memset(output_tx, 0, n_samples * sizeof(int32_t));
+    // keep local outputs silent
+    memset(output_speaker, 0, n_samples * sizeof(int32_t));
+    memset(output_tx, 0, n_samples * sizeof(int32_t));
 }
 
 /* ------------------------------------------------------------------ */
