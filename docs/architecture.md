@@ -2,12 +2,7 @@
 
 This documents the receive signal path from antenna to baseband I/Q — the
 part that's easy to get wrong, because most of it lives in analog hardware
-and a fixed relationship between two si5351 clocks that isn't obvious from
-reading any single source file. Three separate bugs in this chain shipped
-and shadowed each other before being found by diffing against
-[drexjj/sbitx](https://github.com/drexjj/sbitx), the working codebase
-minibitx was carved down from; the last section of this document records
-them so they don't get reintroduced.
+and a fixed relationship between two si5351 clocks.
 
 minibitx has no onboard demodulation, no waterfall, no mode logic — the
 connected SDR app does all of that. This document only covers what happens
@@ -25,11 +20,11 @@ before the signal leaves the Pi as baseband I/Q.
   Mixer 1  <---  clk2, si5351 RX LO (SWEEPS with tuning)
      |            radio.c: si5351bx_setfreq(2, f + bfo_freq - RX_IF_HZ)
      v
-  Crystal filter, fixed at bfo_freq (~40.035 MHz)
+  Crystal filter, fixed at bfo_freq (~40.035 MHz, based on hardware spec review)
      |
      v
-  Mixer 2  <---  clk1, si5351 BFO (FIXED, never swept)
-     |            minibitx.c: si5351bx_setfreq(1, bfo_freq), once at startup
+  Mixer 2  <---  clk1, si5351 BFO (FIXED, never swept, calculated to shift output
+     |           of mixer 1 to baseband) set on startup minibitx.c: si5351bx_setfreq(1, bfo_freq)
      v
   Low IF, fixed at RX_IF_HZ (24000 Hz)
      |
@@ -83,7 +78,7 @@ regardless of what frequency you're tuned to, because Mixer 1 already did
 the job of bringing the *desired* signal to that same fixed `bfo_freq`
 point — Mixer 2 only has to undo the fixed offset, not track the tuning.
 
-**ADC / audio codec.** `sound.c` opens the ALSA capture device at 48 kHz
+**ADC / audio codec.** `sound.c` opens the ALSA capture device at 96 kHz
 and hands each block of raw samples to `sound_process()`. brought up via
 the dtoverlay=audioinjector-wm8731-audio.  That kernel driver does the actual
 I2C register writes to the WM8731 (input mux, gain, mute, etc.) itself;
