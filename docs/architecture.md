@@ -29,7 +29,7 @@ before the signal leaves the Pi as baseband I/Q.
   Low IF, fixed at RX_IF_HZ (24000 Hz)
      |
      v
-  ADC / wm8731 audio codec (sound.c, 48 kHz sample rate)
+  ADC / wm8731 audio codec (sound.c, 96 kHz sample rate)
      |
      v
   Software VFO (vfo.c, "lo" in radio.c) <--- FIXED at RX_IF_HZ, never swept
