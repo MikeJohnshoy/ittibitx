@@ -3,12 +3,6 @@
 // A tiny application that initializes the sbitx radio hardware,
 // and allows a remote SDR application to control its operation over the network using
 // a subset of openHPSDR Protocol 1 and/or HAMLIB / rigctl.
-//
-// Hardware control (GPIO/LPF/oscillator/codec) lives in radio_hw.c and
-// si5351v2.c; tuning/control glue lives in radio.c; audio capture and
-// IQ mixing live in sound.c; the optional USB Audio Class IQ gadget lives
-// in usb_gadget.c; the console status line lives in status.c. This file
-// just brings them up in order.
 
 #include "hpsdr_p1.h"
 #include "si5351.h"
