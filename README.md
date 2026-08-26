@@ -1,6 +1,6 @@
 # minibitx — an experimental test bed
 
-Use sbitx hardware with external SDR software like Quisk or SDR Console.
+'minibitx' lets us Use our sbitx hardware with external SDR software like Quisk or SDR Console.
 minibitx runs on the Raspberry Pi board inside your sbitx as an
 alternative to the `sbitx` software that came with the radio. It has no
 dependency on the sbitx software and expects to run stand-alone.
