@@ -20,7 +20,6 @@ void radio_tune_to(uint32_t f) {
     si5351bx_setfreq(2, f + bfo_freq - RX_IF_FREQ_HZ);
     vfo_start(&lo, RX_IF_FREQ_HZ, lo.phase);
     set_lpf_40mhz(f);    // enable the correct LPF for this band
-    printf("Tuned to: %d Hz\n", f);
 }
 
 // switch between RX and TX
@@ -30,12 +29,10 @@ void radio_set_tx(int tx_on) {
         radio_hw_set_ptt(1);
         usleep(20000);              // let PTT assert before keying the relay
         radio_hw_set_tx_relay(1);
-        printf("TX on\n");
     } else {
         radio_hw_set_ptt(0);
         usleep(5000);               // let the relay settle before dropping PTT
         radio_hw_set_tx_relay(0);
         in_tx = 0;
-        printf("TX off\n");
     }
 }
