@@ -1,13 +1,13 @@
 # minibitx — an experimental test bed
 
 This code configures sbitx hardware for use with external SDR software like Quisk or
-SDR Console.  minibitx runs on the Raspberry Pi board inside your sbitx as an
-alternative to the `sbitx` software that came with the radio. It has no
+SDR Console.  minibitx runs on the Raspberry Pi board inside your sbitx in place of
+the `sbitx` software that came with the radio. It has no
 dependency on the sbitx software and expects to run stand-alone.  
 
 minibitx controls the sbitx hardware via HAMLIB/rigctl commands and
 outputs baseband I/Q data via a subset of HPSDR Protocol 1 and/or USB
-audio. It provides no user interface of its own beyond a one-line console
+audio. It provides no user interface of its own beyond the console
 status display — the external SDR application supplies all of the
 receive/transmit processing: FFT display, demodulation, filtering, and
 audio routing. minibitx started as a trim-down of the much larger sbitx
