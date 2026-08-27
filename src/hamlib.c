@@ -279,8 +279,8 @@ int hamlib_init(int port)
         return -1;
     }
     pthread_detach(accept_thread);
-
     printf("init: Hamlib/rigctld listening on TCP %d\n", port);
+    return 0;
 }
 
 void hamlib_stop(void)
