@@ -39,8 +39,14 @@ static int iq_buf_count = 0;
 static double hpsdr_iq_gain = 1.0;  // <<<<< add gain to I and Q data going out
 
 extern void radio_set_tx(int tx_on);
-extern int freq_hdr;   // read-only here - hamlib.c's "F" command owns writing it
+extern void radio_tune_to(uint32_t f);   // same call hamlib.c "F" command uses
+extern int freq_hdr;   // hamlib.c "F" command and this file's EP2 handler both retune via radio_tune_to()
 extern int in_tx;      // read-only here - radio_set_tx() owns writing it
+
+// Last non-zero RX1 (DDC0) frequency seen in EP2 C&C addr 0x02. Persisted
+// because the client's C&C round-robin only populates this slot once every
+// several frames - it's zero the rest of the time.
+static uint32_t last_rx_freq = 0;
 
 // --- Packet construction & inline transmission ------------------------------
 
@@ -262,10 +268,13 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 uint8_t *fp = buf + 8 + frame * 512;
                 if (fp[0] != 0x7F || fp[1] != 0x7F || fp[2] != 0x7F) continue;
 
-                // MOX (PTT) is the only thing still read from this stream:
-                // some SDR apps key PTT through bit 0 of C0 even while
-                // using CAT (hamlib.c) for everything else. Edge-triggered
-                // because this C&C byte arrives on every frame, but
+                // C&C slot this frame carries (bits 5:1 of C0) - same
+                // addressing build_and_send_packet() uses outbound.
+                int cc_addr = (fp[3] >> 1) & 0x7F;
+
+                // MOX (PTT): some SDR apps key PTT through bit 0 of C0
+                // even while using CAT for everything else. Edge-triggered
+                // since this C&C byte arrives on every frame, but
                 // radio_set_tx() drives GPIO with settling delays, so only
                 // call it when the requested state actually changes.
                 int want_tx = (fp[3] & 0x01) ? 1 : 0;
@@ -273,6 +282,22 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                     radio_set_tx(want_tx);
                     printf("hpsdr: MOX -> %s\n", want_tx ? "TX on" : "TX off");
                 }
+
+                // addr 0x02 = RX1 (DDC0) frequency - the operator's tuned
+                // signal in the SDR app, big-endian in bytes 4..7.
+                if (cc_addr == 0x02) {
+                    uint32_t freq = ((uint32_t)fp[4] << 24) | ((uint32_t)fp[5] << 16) |
+                                     ((uint32_t)fp[6] <<  8) |  (uint32_t)fp[7];
+                    if (freq) last_rx_freq = freq;
+                }
+            }
+
+            // Follow the SDR app's tuning while receiving. Skip during TX
+            // (remote MOX or physical key) so we don't yank the VFO back
+            // to the RX frequency mid-transmission.
+            if (!in_tx && last_rx_freq && last_rx_freq != (uint32_t)freq_hdr) {
+                radio_tune_to(last_rx_freq);
+                printf("hpsdr: remote tune -> %u Hz\n", last_rx_freq);
             }
         }
         break;
