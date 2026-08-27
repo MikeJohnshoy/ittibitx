@@ -71,7 +71,7 @@ stage always lands at the same fixed IF; that's the whole point of a
 superheterodyne front end, and it's also *why* nothing downstream of
 this stage needs to know the current operating frequency.
 
-For our example cw signal at 7030000
+For our example cw signal at 7030000, 
 clk2 = 7,030,000 + 40,012,400 - 24,000 = 47,018,400 Hz
 
 **Crystal filter.** A fixed bandpass filter centered at `bfo_freq`. This
