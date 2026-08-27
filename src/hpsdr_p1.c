@@ -48,6 +48,11 @@ extern int in_tx;      // read-only here - radio_set_tx() owns writing it
 // several frames - it's zero the rest of the time.
 static uint32_t last_rx_freq = 0;
 
+// Last non-zero TX VFO frequency seen in EP2 C&C addr 0x01. In SDR Console
+// this is the operator's selected signal ("RX 1"); in apps like SPARK SDR
+// it's always the spectrum center, same as last_rx_freq.
+static uint32_t last_tx_freq = 0;
+
 // --- Packet construction & inline transmission ------------------------------
 
 static void build_and_send_packet(void)
@@ -272,6 +277,21 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 // addressing build_and_send_packet() uses outbound.
                 int cc_addr = (fp[3] >> 1) & 0x7F;
 
+                // addr 0x01 = TX VFO frequency (operator's selected signal
+                // in SDR Console; spectrum center in apps like SPARK SDR).
+                if (cc_addr == 0x01) {
+                    uint32_t freq = ((uint32_t)fp[4] << 24) | ((uint32_t)fp[5] << 16) |
+                                     ((uint32_t)fp[6] <<  8) |  (uint32_t)fp[7];
+                    if (freq) last_tx_freq = freq;
+                }
+
+                // addr 0x02 = RX1 (DDC0) frequency.
+                if (cc_addr == 0x02) {
+                    uint32_t freq = ((uint32_t)fp[4] << 24) | ((uint32_t)fp[5] << 16) |
+                                     ((uint32_t)fp[6] <<  8) |  (uint32_t)fp[7];
+                    if (freq) last_rx_freq = freq;
+                }
+
                 // MOX (PTT): some SDR apps key PTT through bit 0 of C0
                 // even while using CAT for everything else. Edge-triggered
                 // since this C&C byte arrives on every frame, but
@@ -279,9 +299,24 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 // call it when the requested state actually changes.
                 int want_tx = (fp[3] & 0x01) ? 1 : 0;
                 if (want_tx != in_tx) {
+                    if (want_tx) {
+                        // Retune to the operator's TX frequency before
+                        // keying. Fall back to the RX frequency if addr
+                        // 0x01 was never received.
+                        uint32_t tx_freq = last_tx_freq ? last_tx_freq : last_rx_freq;
+                        if (tx_freq && tx_freq != (uint32_t)freq_hdr)
+                            radio_tune_to(tx_freq);
+                    }
                     radio_set_tx(want_tx);
                     printf("hpsdr: MOX -> %s\n", want_tx ? "TX on" : "TX off");
                 }
+            }
+
+            // Follow the SDR app's tuning while receiving.
+            if (!in_tx && last_rx_freq && last_rx_freq != (uint32_t)freq_hdr) {
+                radio_tune_to(last_rx_freq);
+                printf("hpsdr: remote tune -> %u Hz\n", last_rx_freq);
+            }
 
                 // addr 0x02 = RX1 (DDC0) frequency - the operator's tuned
                 // signal in the SDR app, big-endian in bytes 4..7.
