@@ -51,6 +51,8 @@ goes next is [`04_remote_control_and_iq_output.md`](04_remote_control_and_iq_out
 Two mixer stages, two si5351 clocks, two different jobs.
 
 ## Stage by stage
+At each stage we can look at an example following a single CW signal
+at 7030000 as it flows from the antenna through to I&Q outuput.
 
 **LPF bank.** `radio_hw.c`'s `set_lpf_40mhz(frequency)` selects one of
 four low-pass filter relays (`LPF_A`–`LPF_D`) based on the tuned
@@ -69,6 +71,9 @@ stage always lands at the same fixed IF; that's the whole point of a
 superheterodyne front end, and it's also *why* nothing downstream of
 this stage needs to know the current operating frequency.
 
+For our example cw signal at 7030000
+clk2 = 7,030,000 + 40,012,400 - 24,000 = 47,018,400 Hz
+
 **Crystal filter.** A fixed bandpass filter centered at `bfo_freq`. This
 is the receiver's actual selectivity — everything outside its passband
 is rejected before the signal ever reaches Mixer 2. minibitx does no
@@ -79,7 +84,7 @@ anti-alias filter to complement it live in
 [`dsp_design_notes/`](dsp_design_notes/).)
 
 **Mixer 2 — the BFO (clk1), which is fixed and started once.** This
-mixer brings the crystal-filter output (still up at ~40 MHz) down to a
+mixer brings the crystal-filter output (centered at 40,012,400) down to a
 low IF of `RX_IF_HZ` (24000 Hz) that the audio codec can actually
 sample. Its LO is si5351 `clk1`, set once in `minibitx.c` at startup —
 `si5351bx_setfreq(1, bfo_freq)` — and never touched again for the life
