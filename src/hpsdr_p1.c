@@ -317,23 +317,6 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 radio_tune_to(last_rx_freq);
                 printf("hpsdr: remote tune -> %u Hz\n", last_rx_freq);
             }
-
-                // addr 0x02 = RX1 (DDC0) frequency - the operator's tuned
-                // signal in the SDR app, big-endian in bytes 4..7.
-                if (cc_addr == 0x02) {
-                    uint32_t freq = ((uint32_t)fp[4] << 24) | ((uint32_t)fp[5] << 16) |
-                                     ((uint32_t)fp[6] <<  8) |  (uint32_t)fp[7];
-                    if (freq) last_rx_freq = freq;
-                }
-            }
-
-            // Follow the SDR app's tuning while receiving. Skip during TX
-            // (remote MOX or physical key) so we don't yank the VFO back
-            // to the RX frequency mid-transmission.
-            if (!in_tx && last_rx_freq && last_rx_freq != (uint32_t)freq_hdr) {
-                radio_tune_to(last_rx_freq);
-                printf("hpsdr: remote tune -> %u Hz\n", last_rx_freq);
-            }
         }
         break;
 
