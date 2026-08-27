@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
   }
   printf("init: audio capture running (hw:0,0 @ 96000 Hz)\n");
 
-  printf("minibitx: radio hardware initialization complete\n");
+  printf("minibitx: radio hardware initialization complete, ready to serve!\n");
 
   // One-time snapshot of frequency/RX-TX/drive state at the moment control
   // passes to whatever external app connects next. status_print() redraws
