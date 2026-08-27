@@ -284,6 +284,7 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
 
 static void *hpsdr_poll_thread(void *arg)
 {
+    (void)arg;
     uint8_t buf[2048];
     struct sockaddr_in sender;
     socklen_t sender_len;
