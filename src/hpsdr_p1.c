@@ -269,8 +269,10 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 // radio_set_tx() drives GPIO with settling delays, so only
                 // call it when the requested state actually changes.
                 int want_tx = (fp[3] & 0x01) ? 1 : 0;
-                if (want_tx != in_tx)
+                if (want_tx != in_tx) {
                     radio_set_tx(want_tx);
+                    printf("hpsdr: MOX -> %s\n", want_tx ? "TX on" : "TX off");
+                }
             }
         }
         break;
