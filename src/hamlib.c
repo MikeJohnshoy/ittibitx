@@ -137,6 +137,20 @@ static int handle_line(int fd, char *line)
         return 0;
     }
 
+    if (cmd[0] == 'v' && (cmd[1] == '\0' || cmd[1] == ' ')) {
+        // get_vfo - minibitx has only one VFO, always report it
+        send_line(fd, "VFOA\n");
+        printf("rigctl: v -> VFOA\n");
+        return 0;
+    }
+    if (cmd[0] == 'V' && cmd[1] == ' ') {
+        // set_vfo <vfo> - minibitx has only one VFO; accept and report success
+        // regardless of the requested name, since there's nothing else to switch to.
+        send_rprt(fd, 0);
+        printf("rigctl: V %s -> ok (single VFO)\n", cmd + 2);
+        return 0;
+    }
+
     if (strcmp(cmd, "chk_vfo") == 0 || strcmp(cmd, "\\chk_vfo") == 0) {
         // Single-VFO radio - report "not in VFO mode" so callers send
         // plain f/F/t/T without needing a VFO argument.
