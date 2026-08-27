@@ -41,6 +41,15 @@ demod/filtering decisions, the SDR app is. Point an SDR app's CAT/rig
 control at `127.0.0.1:4532` (rig model "Hamlib NET rigctl") alongside its
 HPSDR connection for live retuning.
 
+Every command that changes or reports state also echoes to the console,
+one line per command, e.g. `rigctl: F 7074000 -> tuned to 7074000 Hz` or
+`rigctl: T 1 -> TX on`. `radio_tune_to()`/`radio_set_tx()` (`radio.c`)
+themselves print nothing — each control surface logs its own result,
+since it's the one that knows which command triggered the change. This
+is minibitx's primary window into operational state once startup
+finishes; see
+[`05_process_and_threading_model.md`](05_process_and_threading_model.md).
+
 ## HPSDR Protocol 1 — inbound (control) and outbound (I/Q)
 
 `hpsdr_p1.c` implements a minimal openHPSDR Protocol 1 link over UDP,
@@ -51,7 +60,10 @@ rigctld server above — the *only* thing `hpsdr_p1.c` reads from the
 inbound stream is the MOX (PTT) bit, since some SDR apps key PTT through
 the I/Q link's C0 byte even while using CAT for everything else. When it
 sees that bit change, it calls `radio_set_tx()` — the same entry point
-Hamlib uses, never a separate path.
+Hamlib uses, never a separate path — and echoes it to the console as
+`hpsdr: MOX -> TX on` / `hpsdr: MOX -> TX off`, tagged `hpsdr:` rather
+than `rigctl:` so it's clear which control surface actually drove the
+change.
 
 **Outbound (I/Q):** `hpsdr_send_iq()` packetizes the baseband I/Q handed
 to it by `sound_process()` into HPSDR Protocol 1 UDP frames and sends

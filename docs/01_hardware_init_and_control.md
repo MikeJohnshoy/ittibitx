@@ -12,12 +12,21 @@ happens to those samples once they arrive.
 1. `radio_hw_gpio_init()` — GPIO lines and RX-safe idle state (below)
 2. `si5351bx_init()` / `si5351bx_setfreq(1, bfo_freq)` / `si5351_reset()`
    — oscillator bring-up (below)
-3. `vfo_init_phase_table()` / `vfo_start()` / `radio_tune_to()` —
+3. `radio_hw_detect_version()` / `radio_hw_ina260_configure()` — board
+   revision and power monitor, probed right after the si5351 bring-up
+   above since they share its I2C bus (below)
+4. `vfo_init_phase_table()` / `vfo_start()` / `radio_tune_to()` —
    software RX VFO and initial tuning (covered in
    [`02_rx_processing_pipeline.md`](02_rx_processing_pipeline.md))
-4. Networking and control surfaces — HPSDR, Hamlib/rigctld, USB gadget
+5. Networking and control surfaces — HPSDR, Hamlib/rigctld, USB gadget
    (covered in
    [`04_remote_control_and_iq_output.md`](04_remote_control_and_iq_output.md))
+
+Each step above prints one console line reporting its own result, in a
+consistent `init: ...` format, ending with `minibitx: radio hardware
+initialization complete` once every step has run. See
+[`05_process_and_threading_model.md`](05_process_and_threading_model.md)
+for what the console reports after that point.
 5. `setup_audio_codec()` / `sound_thread_start()` — WM8731 codec and
    capture stream (below)
 
@@ -56,9 +65,11 @@ sbitx and unconfirmed here (see `radio_hw.h`).
 `radio_hw_detect_version()` probes I2C address `0x8` with a 4-byte block
 read. If that read fails, it reports `SBITX_DE` (original sbitx, no
 power/SWR bridge board); if it succeeds, `SBITX_V2` (v2-and-later
-hardware, power/SWR bridge present). Nothing in the current codebase
-branches on this yet beyond the detection call itself — it exists as a
-hook for hardware-revision-dependent behavior to attach to later.
+hardware, power/SWR bridge present). It's called once, from `main()`,
+right after the si5351/I2C bus comes up — its result is logged
+(`init: board revision detected: ...`) but nothing else in the codebase
+branches on it yet; it exists as a hook for hardware-revision-dependent
+behavior to attach to later.
 
 ## LPF bank switching
 
@@ -81,12 +92,15 @@ independently.
 ## INA260 power monitor
 
 `radio_hw_ina260_configure()` writes `0x6127` (continuous mode, default
-averaging) to the INA260's config register at I2C address `0x40`.
-`read_voltage_current()` then reads the voltage and current registers
-(1.25 mV/LSB and 1.25 mA/LSB respectively) on demand, treating an
-all-ones current reading as out-of-range/invalid rather than a real
-value. Used for status reporting (`status.c`), not for any control
-decision.
+averaging) to the INA260's config register at I2C address `0x40`. It's
+called once, from `main()`, alongside board revision detection above —
+`init: INA260 power monitor configured`, or a non-fatal
+`init: INA260 power monitor not responding, continuing without it` if
+the write fails. `read_voltage_current()` then reads the voltage and
+current registers (1.25 mV/LSB and 1.25 mA/LSB respectively) on demand,
+treating an all-ones current reading as out-of-range/invalid rather than
+a real value. Used for status reporting (`status.c`), not for any
+control decision.
 
 ## si5351 oscillator and I2C bus
 
