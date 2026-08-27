@@ -65,6 +65,7 @@ static int handle_line(int fd, char *line)
 
     if (strcmp(cmd, "q") == 0 || strcmp(cmd, "Q") == 0 ||
         strcmp(cmd, "quit") == 0) {
+        printf("rigctl: %s -> closing connection\n", cmd);
         return -1;
     }
 
@@ -73,6 +74,7 @@ static int handle_line(int fd, char *line)
         char buf[32];
         snprintf(buf, sizeof(buf), "%d\n", freq_hdr);
         send_line(fd, buf);
+        printf("rigctl: f -> %d Hz\n", freq_hdr);
         return 0;
     }
 
@@ -81,10 +83,12 @@ static int handle_line(int fd, char *line)
         long f = strtol(cmd + 1, NULL, 10);
         if (f <= 0) {
             send_rprt(fd, -1);
+            printf("rigctl: F%s -> invalid frequency, ignored\n", cmd + 1);
             return 0;
         }
         radio_tune_to((uint32_t)f);
         send_rprt(fd, 0);
+        printf("rigctl: F %ld -> tuned to %ld Hz\n", f, f);
         return 0;
     }
 
@@ -93,6 +97,7 @@ static int handle_line(int fd, char *line)
         char buf[8];
         snprintf(buf, sizeof(buf), "%d\n", in_tx ? 1 : 0);
         send_line(fd, buf);
+        printf("rigctl: t -> %s\n", in_tx ? "TX" : "RX");
         return 0;
     }
 
@@ -100,8 +105,10 @@ static int handle_line(int fd, char *line)
         // set_ptt <0|1|2|3> - minibitx has one TX state, no separate
         // mic/data distinction, so anything nonzero means TX.
         long v = strtol(cmd + 1, NULL, 10);
-        radio_set_tx(v != 0);
+        int tx_on = (v != 0);
+        radio_set_tx(tx_on);
         send_rprt(fd, 0);
+        printf("rigctl: T %ld -> %s\n", v, tx_on ? "TX on" : "TX off");
         return 0;
     }
 
@@ -110,6 +117,7 @@ static int handle_line(int fd, char *line)
         char buf[64];
         snprintf(buf, sizeof(buf), "%s\n%d\n", current_mode, current_passband);
         send_line(fd, buf);
+        printf("rigctl: m -> %s %d\n", current_mode, current_passband);
         return 0;
     }
 
@@ -124,6 +132,8 @@ static int handle_line(int fd, char *line)
         }
         current_passband = passband;
         send_rprt(fd, 0);
+        printf("rigctl: M %s %d -> ok (cosmetic, not applied)\n",
+               current_mode, current_passband);
         return 0;
     }
 
@@ -131,6 +141,7 @@ static int handle_line(int fd, char *line)
         // Single-VFO radio - report "not in VFO mode" so callers send
         // plain f/F/t/T without needing a VFO argument.
         send_line(fd, "0\n");
+        printf("rigctl: chk_vfo -> 0\n");
         return 0;
     }
 
@@ -163,11 +174,13 @@ static int handle_line(int fd, char *line)
         send_line(fd, "0x0\n");                       // has_set_level
         send_line(fd, "0x0\n");                       // has_get_parm
         send_line(fd, "0x0\n");                       // has_set_parm
+        printf("rigctl: dump_state -> sent\n");
         return 0;
     }
 
     // Unknown command - reply cleanly instead of hanging the client.
     send_rprt(fd, -1);
+    printf("rigctl: %s -> unknown command\n", cmd);
     return 0;
 }
 
@@ -267,8 +280,7 @@ int hamlib_init(int port)
     }
     pthread_detach(accept_thread);
 
-    printf("hamlib: rigctld-compatible server listening on port %d\n", port);
-    return 0;
+    printf("init: Hamlib/rigctld listening on TCP %d\n", port);
 }
 
 void hamlib_stop(void)
