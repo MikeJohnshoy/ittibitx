@@ -12,7 +12,7 @@ int in_tx = 0;
 // center is at 40.0124 MHz. The prior value here (40.035 MHz) was 22.6kHz
 // off - so the desired signal was landing well off-center in the passband, not
 // symmetric on the 24kHz digital IF as radio_tune_to()'s math assumes.
-int bfo_freq = 40012400;    // old value was 40035000
+int bfo_freq = 40035000;    // tried 40124000 and that was not good
 struct vfo lo;
 
 void radio_tune_to(uint32_t f) {
