@@ -142,9 +142,7 @@ static int xrun_recover(snd_pcm_t *pcm, int err)
 }
 
 /* ------------------------------------------------------------------ */
-/*  IQ mixing - RX audio -> baseband IQ -> hpsdr_send_iq()             */
-/*  DSP, not hardware control: uses the software RX VFO (vfo.c) and    */
-/*  the tuning state owned by radio.c.                                 */
+/*  IQ mixing                                                         */
 /* ------------------------------------------------------------------ */
 static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output_speaker,
                            int32_t *output_tx, int n_samples) {
@@ -157,9 +155,7 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
 
     if (!vfo_ready) {
         vfo_init_phase_table();
-        // Must match RX_IF_FREQ_HZ, the fixed IF radio_tune_to() targets
-        // (see radio.h) - not freq_hdr, the RF dial frequency. This lazy
-        // init only matters if sound_process() is ever called before
+        // this init only matters if sound_process() is ever called before
         // main()'s own startup vfo_start()/radio_tune_to()
         vfo_start(&lo, RX_IF_FREQ_HZ, 0);
         vfo_ready = 1;
@@ -170,25 +166,19 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
         int lo_i, lo_q;
         vfo_read_iq(&lo, &lo_i, &lo_q);
 
-        // S32 -> [-1, +1)
         double rf = (double)s / 2147483648.0;
 
-        // Mix to IQ
+        // mix to IQ
         i_samples[n] = rf * ((double)lo_i / 1073741824.0);
         q_samples[n] = rf * ((double)lo_q / 1073741824.0);
     }
 
-    // Hand the block's IQ to each consumer as its own copy - hpsdr_p1.c
+    // hand the block's IQ to each consumer as its own copy - hpsdr_p1.c
     // (network) and usb_gadget.c (USB Audio Class gadget) don't know about
-    // each other, and either can be active without the other. This call
-    // was dropped by an earlier cleanup that (correctly) removed a
-    // different, redundant push from this same file, but (incorrectly)
-    // took this one with it - untested until now, but meant to stay wired
-    // up alongside HPSDR/UDP, not replaced by it.
+    // each other, and either can be active without the other
+    hpsdr_send_iq(i_samples, q_samples, n_samples);
     for (int n = 0; n < n_samples; n++)
         uac_push_iq(i_samples[n], q_samples[n]);
-
-    hpsdr_send_iq(i_samples, q_samples, n_samples);
 
     // keep local outputs silent
     memset(output_speaker, 0, n_samples * sizeof(int32_t));
