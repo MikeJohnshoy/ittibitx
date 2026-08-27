@@ -205,7 +205,7 @@ static int uac_gadget_create(void) {
         return -1;
     }
 
-    printf("uac: gadget 'sBitx IQ' bound to UDC '%s'\n", udc_name);
+    printf("init: USB IQ gadget bound to UDC '%s'\n", udc_name);
     return 0;
 }
 
