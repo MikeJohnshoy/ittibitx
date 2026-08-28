@@ -16,6 +16,8 @@
 #define LPF_B     6
 #define LPF_C     10
 #define LPF_D     11
+#define CW_KEY    7    // straight key input (active low - open = idle,
+                       // closed to ground = key down)
 
 /* ---- Board hardware revision ------------------------------------------ */
 
@@ -45,6 +47,12 @@ void radio_hw_set_ptt(int on);
 /* Drives the T/R relay control line (TX_LINE) high (on, transmit) or low
  * (off, receive). Same no-delay/no-policy contract as radio_hw_set_ptt(). */
 void radio_hw_set_tx_relay(int on);
+
+/* Reads the straight key (CW_KEY). Returns 1 if the key is down (pin
+ * pulled low), 0 if up. No debounce - see cw.c, which polls this once
+ * per audio block rather than trying to sample faster than that. */
+
+int radio_hw_key_down(void);
 
 /* Reads the INA260 power monitor's voltage (V) and current (A) registers
  * over I2C. On any I2C error, both outputs are set to 0.0. */
