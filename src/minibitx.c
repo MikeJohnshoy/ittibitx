@@ -14,6 +14,7 @@
 #include "status.h"
 #include "hamlib.h"
 #include "hw_settings.h"
+#include "cw.h"
 #include <stdio.h>
 #include <unistd.h>
 
@@ -75,6 +76,11 @@ int main(int argc, char **argv) {
   radio_tune_to(freq_hdr);
   printf("init: RX VFO started, tuned to %d Hz\n", freq_hdr);
 
+  // Straight-key CW support (src/cw.c) - needs the phase table above
+  // already built, since it starts its own sidetone oscillator.
+  cw_init();
+  printf("init: CW straight key ready (GPIO %d)\n", CW_KEY);
++
   // Initialize Networking (HPSDR Protocol 1)
   if (hpsdr_init() < 0) {
     fprintf(stderr, "init: HPSDR socket bind failed\n");
