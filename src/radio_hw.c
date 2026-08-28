@@ -31,6 +31,9 @@ int radio_hw_gpio_init(void)
 	pinMode(LPF_C, OUTPUT);
 	pinMode(LPF_D, OUTPUT);
 
+	pinMode(CW_KEY, INPUT);
+	pullUpDnControl(CW_KEY, PUD_UP); // idle high; key closes to ground
+
 	digitalWrite(LPF_A, LOW);
 	digitalWrite(LPF_B, LOW);
 	digitalWrite(LPF_C, LOW);
@@ -104,6 +107,11 @@ void radio_hw_set_ptt(int on)
 void radio_hw_set_tx_relay(int on)
 {
 	digitalWrite(TX_LINE, on ? HIGH : LOW);
+}
+
+int radio_hw_key_down(void)
+{
+	return digitalRead(CW_KEY) == LOW;
 }
 
 /* ---- INA260 power monitor ------------------------------------------------ */
