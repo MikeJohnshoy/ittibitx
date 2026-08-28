@@ -6,8 +6,7 @@ the `sbitx` software that came with the radio. It has no
 dependency on the sbitx software and expects to run stand-alone.  
 
 minibitx supports connecting to the sbitx hardware via HPSDR Protocol 1 and/or USB
-audio.  The sbitx hardware can also be controlled via a small set of HAMLIB/rigctl commands.  
-It provides no user interface of its own beyond the console
+audio.  The sbitx hardware can also be controlled via a small set of HAMLIB/rigctl commands.  It provides no user interface of its own beyond the console
 status display.  The external SDR application must supply all of the
 receive/transmit signal processing: spectrum and waterfall, demodulation, filtering, and
 audio routing. minibitx started as a trimmed-down and more modular version of the much larger sbitx
