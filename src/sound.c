@@ -5,6 +5,7 @@
 #include "radio.h"
 #include "hpsdr_p1.h"
 #include "usb_gadget.h"
+#include "antialias.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -149,6 +150,11 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
     static double i_samples[4096];
     static double q_samples[4096];
     static int vfo_ready = 0;
+    // filter I and Q with independent history per rail, same coefficients (antialias.c) -
+    // zero-initialized once, persists across calls (each call is one
+    // ~10.7ms block, not a fresh signal).
+    static struct antialias_state aa_i;
+    static struct antialias_state aa_q;
 
     (void)input_mic;
     if (n_samples > 4096) n_samples = 4096;
@@ -171,6 +177,14 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
         // mix to IQ
         i_samples[n] = rf * ((double)lo_i / 1073741824.0);
         q_samples[n] = rf * ((double)lo_q / 1073741824.0);
+     
+        // Anti-alias lowpass, applied per rail right after mixing (see
+        // docs/dsp_design_notes/antialias_filter_design.md). Cleans up
+        // the self-image that single-real-ADC-channel I/Q synthesis
+        // produces near the +-48kHz Nyquist edges, without touching the
+        // real signal content well within the crystal filter's passband.
+        i_samples[n] = antialias_apply(&aa_i, i_samples[n]);
+        q_samples[n] = antialias_apply(&aa_q, q_samples[n]);
     }
 
     // hand the block's IQ to each consumer as its own copy - hpsdr_p1.c
