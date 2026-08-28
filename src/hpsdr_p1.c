@@ -300,11 +300,14 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 // call it when the requested state actually changes.
                 int want_tx = (fp[3] & 0x01) ? 1 : 0;
 
-                // Don't let a MOX=0 packet override a CW keying burst in
-                // progress. cw.c and this handler both drive the same
-                // radio_set_tx()/in_tx state with no other coordination
-                // between them
-                if (want_tx == 0 && cw_tx_active())
+                // Defer to the local key completely while it's holding
+                // TX - not just against a MOX=0 override, but a MOX=1
+                // one too. A MOX=1 transition below retunes to
+                // last_tx_freq (whatever "TX VFO" the SDR app last
+                // reported), which can easily be a stale/unrelated
+                // value (parked on a different band from whatever
+                // you're actually keying on right now)
+                if (cw_tx_active())
                     continue;
 
                 if (want_tx != in_tx) {
