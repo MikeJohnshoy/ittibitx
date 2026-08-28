@@ -6,6 +6,7 @@
 #include "hpsdr_p1.h"
 #include "usb_gadget.h"
 #include "antialias.h"
+#include "cw.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -211,6 +212,7 @@ static void *audio_loop(void *arg)
     int32_t mic_buf[MAX_FRAMES];
     int32_t spk_buf[MAX_FRAMES];
     int32_t tx_buf[MAX_FRAMES];
+    int32_t play_buf[MAX_FRAMES * CHANNELS];   // CW sidetone -> WM8731 DAC
 
     while (g_running) {
         snd_pcm_sframes_t frames = snd_pcm_readi(pcm_capture, cap_buf, PERIOD_FRAMES);
@@ -231,7 +233,27 @@ static void *audio_loop(void *arg)
         }
 
         sound_process(rx_buf, mic_buf, spk_buf, tx_buf, n);
-        // No playback write - output goes over HPSDR network
+
+        // Once per audio block - checks the key, manages the CW keying
+        // burst's hang timer, and asserts/releases PTT via radio_set_tx()
+        // (see cw.c). Runs every iteration, TX or not, since this is what
+        // actually notices the key going down in the first place.
+        cw_poll_key();
+
+        if (cw_tx_active() && pcm_playback) {
+            for (int i = 0; i < n; i++) {
+                double s = cw_get_sample();
+                // Headroom below full-scale int32; the right drive level
+                // for the balanced modulator needs a bench check, this
+                // is a starting point, not a calibrated value.
+                int32_t v = (int32_t)(s * 1000000000.0);
+                play_buf[i * 2]     = v;   // L
+                play_buf[i * 2 + 1] = v;   // R - WM8731 output is stereo,
+                                           // sidetone is mono, duplicate it
+            }
+            snd_pcm_sframes_t wframes = snd_pcm_writei(pcm_playback, play_buf, n);
+            if (wframes < 0) xrun_recover(pcm_playback, (int)wframes);
+        }
     }
 
     return NULL;
@@ -247,8 +269,14 @@ int sound_thread_start(const char *device_name)
     pcm_capture = open_pcm(dev, SND_PCM_STREAM_CAPTURE);
     if (!pcm_capture) return -1;
 
-    // No playback needed - IQ goes out over the network, not local audio
-    pcm_playback = NULL;
+    // Playback: CW sidetone output only (see cw.c) - RX IQ still goes
+    // out over the network/UAC2, not through here. Not a hard failure
+    // if it doesn't open; audio_loop() checks pcm_playback before
+    // writing to it, so minibitx still runs (just without CW TX audio).
+    pcm_playback = open_pcm(dev, SND_PCM_STREAM_PLAYBACK);
+    if (!pcm_playback) {
+        printf("sound: playback unavailable, CW sidetone output disabled\n");
+    }
 
     g_running = 1;
     if (pthread_create(&audio_thread, NULL, audio_loop, NULL) != 0) {
