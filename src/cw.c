@@ -1,16 +1,22 @@
 // cw.c
 //
+// Straight-key CW support: polls a physical key wired into GPIO
+// (radio_hw.h's CW_KEY line), holds PTT/the T/R relay for the duration
+// of a keying burst, and generates a single sidetone gated by a
+// table-driven envelope so key-down/key-up transitions don't click.
+//
+// Deliberately narrow - no iambic/paddle keyer logic lives here; that's
+// an external keyer's job (its output is just another on/off contact
+// into the same key line). minibitx stays a support layer for external
+// SDR apps, not a full transceiver - this gets clean dots and dashes
+// out, nothing more.
+//
 // Table-driven Blackman-Harris attack/decay envelope: 480 samples (5ms
 // at 96kHz, matching the rise time real sbitx's own CW keyer uses,
 // modem_cw.c), rising from ~0 to 1.0. Table-driven on purpose - trying
 // a different keying shape later is a table swap, not a logic change.
 // The same table is walked forward for attack (key down) and backward
 // for decay (key up), same trick sbitx's own keyer uses.
-//
-// Straight key only: no iambic/paddle state machine. An external keyer
-// (or a computer sending Morse) is expected to drive this exact same
-// key line with its own clean on/off contact if ever used instead of a
-// hand key.
 //
 // Key polling: cw_poll_key() is called once per audio block (~10.7ms),
 // not faster - a raw digitalRead() at that cadence is the same approach
