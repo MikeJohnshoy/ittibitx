@@ -149,8 +149,8 @@ void cw_poll_key(void) {
 
     if (key_down) {
         if (!tx_active) {
-            radio_set_tx(1);
             tx_active = 1;
+            radio_set_tx(1);
             printf("key down!\n");
         }
         hang_counter = CW_HANG_POLLS;
