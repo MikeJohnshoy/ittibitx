@@ -13,6 +13,7 @@ int in_tx = 0;
 // off - so the desired signal was landing well off-center in the passband, not
 // symmetric on the 24kHz digital IF as radio_tune_to()'s math assumes.
 int bfo_freq = 40012400;
+struct vfo lo;
 
 void radio_tune_to(uint32_t f) {
     freq_hdr = f;
