@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include "cw.h"
 
 #define HPSDR_PORT 1024
 #define HPSDR_PKT_SIZE 1032
