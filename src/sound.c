@@ -79,6 +79,9 @@ void setup_audio_codec(void) {
   sound_mixer("hw:0", "Line", 80);  // 80% of max
   sound_mixer("hw:0", "Mic", 0);
   sound_mixer("hw:0", "Master", 0); // Mute local speaker
+  sound_mixer("hw:0", "Output Mixer HiFi", 1);
+  sound_mixer("hw:0", "Output Mixer Line Bypass", 0);
+  sound_mixer("hw:0", "Output Mixer Mic Sidetone", 0);
 }
 
 /* ------------------------------------------------------------------ */
