@@ -20,7 +20,7 @@
 
 int radio_hw_gpio_init(void)
 {
-	if (wiringPiSetupGpio() < 0)
+	if (wiringPiSetup() < 0)   // not wiringPiSetupGPIO()
 		return -1;
 
 	pinMode(TX_LINE, OUTPUT);
