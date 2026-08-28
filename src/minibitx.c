@@ -13,6 +13,7 @@
 #include "usb_gadget.h"
 #include "status.h"
 #include "hamlib.h"
+#include "hw_settings.h"
 #include <stdio.h>
 #include <unistd.h>
 
@@ -27,7 +28,12 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
 
-  printf("Starting miniBitx IQ Streamer...\n");
+  printf("Starting miniBitx IQ Streamer and control interface...\n");
+
+  // Board-specific calibration (currently just bfo_freq) lives in
+  // data/hw_settings.ini, not in source - the crystal filter center
+  // varies radio to radio. Load it before anything below uses bfo_freq.
+  hw_settings_load();
 
   // Initialize wiringPi and put all GPIO lines (LPF relays, TX_LINE,
   // TX_POWER, EXT_PTT) into their idle state.
