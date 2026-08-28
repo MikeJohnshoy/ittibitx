@@ -298,6 +298,14 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 // radio_set_tx() drives GPIO with settling delays, so only
                 // call it when the requested state actually changes.
                 int want_tx = (fp[3] & 0x01) ? 1 : 0;
+
+                // Don't let a MOX=0 packet override a CW keying burst in
+                // progress. cw.c and this handler both drive the same
+                // radio_set_tx()/in_tx state with no other coordination
+                // between them
+                if (want_tx == 0 && cw_tx_active())
+                    continue;
+
                 if (want_tx != in_tx) {
                     if (want_tx) {
                         // Retune to the operator's TX frequency before
