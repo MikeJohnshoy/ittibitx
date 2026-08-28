@@ -150,8 +150,9 @@ void cw_poll_key(void) {
         if (!tx_active) {
             radio_set_tx(1);
             tx_active = 1;
+            printf("key down!\n");
         }
-        hang_counter = CW_HANG_POLLS;   // any key-down resets the hang timer
+        hang_counter = CW_HANG_POLLS;
     } else if (tx_active) {
         if (hang_counter > 0) {
             hang_counter--;
