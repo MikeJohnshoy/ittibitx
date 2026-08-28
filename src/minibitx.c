@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
   // already built, since it starts its own sidetone oscillator.
   cw_init();
   printf("init: CW straight key ready (GPIO %d)\n", CW_KEY);
-+
+
   // Initialize Networking (HPSDR Protocol 1)
   if (hpsdr_init() < 0) {
     fprintf(stderr, "init: HPSDR socket bind failed\n");
