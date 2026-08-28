@@ -27,6 +27,7 @@
 #include "radio.h"
 #include "radio_hw.h"
 #include "vfo.h"
+#include <stdio.h>
 
 #define CW_ENVELOPE_LEN 480
 
