@@ -31,12 +31,27 @@
 
 #define CW_ENVELOPE_LEN 480
 
-// Sidetone pitch, offset from the fixed RX/TX IF center (radio.h). This
-// is what a real CW pitch control would adjust - see
-// docs/dsp_design_notes/antialias_filter_design.md and the BFO/crystal
-// filter discussion for why the offset (not 0) matters here: it's what
-// gives the tone a real, one-sided frequency once mixed through the
-// fixed BFO/crystal filter chain, the same way rx_pitch does on RX.
+// Sidetone/keying pitch - the actual audio-frequency tone injected into
+// the analog exciter (WM8731 DAC -> balanced modulator -> bfo_freq
+// crystal filter). This is what a real CW pitch control would adjust.
+//
+// Deliberately NOT offset by RX_IF_FREQ_HZ. RX_IF_FREQ_HZ (24kHz) is a
+// digital bookkeeping constant used only in sound_process()'s RX I/Q
+// mixing math - it represents where the wanted signal sits relative to
+// Nyquist in the *digital* domain, not a real audio frequency. Real
+// sbitx's own modem_cw.c generates its CW tone at the bare pitch
+// (vfo_start(&cw_tone, cw_pitch_hz, 0), no IF term) for exactly this
+// reason: the crystal filter's actual measured passband is only about
+// +-17.4-18.4kHz wide (see docs/dsp_design_notes/antialias_filter_design.md).
+// Previously adding RX_IF_FREQ_HZ here put the CW tone at a 24.7kHz
+// offset from bfo_freq - deep in the filter's stopband skirt (~-37dB or
+// worse) - while any residual LO/carrier leak-through from the balanced
+// modulator sits at 0Hz offset (filter center, ~0dB), so the wanted
+// keyed tone was arriving far weaker than an unmodulated, envelope-less
+// leak-through carrier. That explains both the off-center dominant peak
+// seen on a TX spectrum capture and a tail that didn't track the CW
+// envelope or hang timer at all - the leak-through carrier stays present
+// for the whole PTT-hold, independent of the envelope shaping.
 #define CW_PITCH_HZ 700
 
 // How many cw_poll_key() calls (audio blocks) to hold TX after the key
@@ -135,9 +150,8 @@ static int tx_active = 0;      // PTT/relay currently asserted for a keying burs
 static int hang_counter = 0;   // polls remaining before TX releases
 
 void cw_init(void) {
-    // Tone sits at the fixed IF center plus the sidetone pitch, not at
-    // the IF center itself - see the CW_PITCH_HZ comment above.
-    vfo_start(&cw_tone, RX_IF_FREQ_HZ + CW_PITCH_HZ, 0);
+    // Bare pitch, no IF offset - see the CW_PITCH_HZ comment above.
+    vfo_start(&cw_tone, CW_PITCH_HZ, 0);
     envelope_pos = 0;
     key_down = 0;
     tx_active = 0;
