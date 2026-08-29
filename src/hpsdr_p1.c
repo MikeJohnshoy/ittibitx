@@ -189,16 +189,40 @@ void hpsdr_send_iq(double *i_samples, double *q_samples, int n)
 // addresses (0x3A and similar) with the MOX bit seemingly random - the
 // strict per-packet-type length checks below are hpsdrsim's own
 // safeguard against exactly that ("processing an invalid packet is too
-// dangerous - skip it", to quote its comments), and are the real fix,
-// not the narrower "only trust address 0" workaround this file had
-// before.
-
+// dangerous - skip it", to quote its comments). That turned out to be
+// necessary but not sufficient: two more bugs surfaced even with strict
+// lengths in place - reading MOX from every address (matching
+// hpsdrsim.c literally) still picked up unrelated register data as
+// spurious PTT activity, and comparing the network's want_tx against
+// the shared in_tx (which the local key in cw.c also writes) let a
+// stale, already-unchanged network value look like a fresh request the
+// moment the key released TX, latching it on permanently. See the
+// cc_addr and net_mox comments in process_ep2_frame() for both fixes.
 // Tracks the host->radio EP2 sequence number (bytes 4-7 of every
 // 1032-byte packet), purely as a diagnostic - a gap here means a
 // dropped or reordered UDP datagram, not an anomaly in what the SDR
-// app is sending. Never drops a packet over it, just logs.
+// app is sending. Never drops a packet over it, just logs. Bench
+// testing (with SDR Console) showed real, harmless reordering of
+// adjacent packets (359,360,361 sent, arriving as 360,359,361) - normal
+// on a network, not something to fix here, but useful to know isn't
+// packet corruption.
 static uint32_t last_ep2_seq = 0;
 static int have_ep2_seq = 0;
+
+// The network's own last-seen MOX bit, tracked independently of in_tx
+// (which cw.c's local key can also change). Needed for a real bug found
+// in testing: with a local key held, in_tx gets set by the key, not the
+// network - so once the key's hang timer releases TX (in_tx back to 0),
+// the very next EP2 packet carrying whatever the network happened to
+// still be sending (even an unchanged, already-stale want_tx=1 SDR
+// Console had been sending the whole time) looks exactly like a brand
+// new request, because it now differs from the just-released in_tx.
+// One key press then latched TX on permanently, through every further
+// key press, because of this. net_mox lets us tell "the network's
+// intent just changed" apart from "in_tx changed for an unrelated
+// reason (the local key)" - only a real change in net_mox should ever
+// trigger an action here.
+static int net_mox = 0;
 
 // Processes ONE 512-byte EP2 sub-frame. fp points at the frame's sync
 // bytes (0x7F 0x7F 0x7F) - offset buf+8 for the first sub-frame and
@@ -231,26 +255,31 @@ static void process_ep2_frame(uint8_t *fp)
         if (freq) last_rx_freq = freq;
     }
 
-    // MOX (PTT): per the real protocol - and hpsdrsim.c, which reads it
-    // as `frame[0] & 1` unconditionally, before ever looking at the
-    // address - bit0 of C0 is a continuously-repeated "live" flag sent
-    // on every frame, not scoped to address 0 alone. This file used to
-    // restrict it to address 0 as a workaround for the garbage-address
-    // problem above; with strict packet-length validation now in place
-    // (see handle_command()), that workaround shouldn't be needed - if
-    // wild MOX activity on nonsensical addresses shows up again even
-    // with these checks, that's the SDR app's own behavior, not a
-    // parsing bug, and worth chasing on its own.
+    // MOX (PTT) is only acted on from C&C register (address) 0. The
+    // real protocol - and hpsdrsim.c, which reads bit0 of C0 as
+    // `frame[0] & 1` before ever looking at the address - treats MOX as
+    // live on every frame regardless of address; testing that literally
+    // (removing this same restriction) reintroduced spurious activity
+    // even with strict packet-length validation in place, so it's kept
+    // here as a real, bench-confirmed requirement against these
+    // clients, not just a workaround for a since-fixed parsing bug.
+    if (cc_addr != 0x00)
+        return;     
+    
     int want_tx = (fp[3] & 0x01) ? 1 : 0;
+    int net_mox_changed = (want_tx != net_mox);
+    net_mox = want_tx;
 
     // Defer to the local key completely while it's holding TX - see
-    // cw.c. This is independent of where want_tx came from: a genuine
-    // physical key-down should never be interrupted by a network PTT
-    // command, real or spurious.
+    // cw.c. net_mox is still kept current above (rather than skipped
+    // entirely) specifically so a value the network was already sending
+    // before the key took over doesn't look like a fresh edge the
+    // moment it releases - see the net_mox comment above for why that
+    // matters.
     if (cw_tx_active())
         return;
 
-    if (want_tx != in_tx) {
+    if (net_mox_changed && want_tx != in_tx) {
         if (want_tx) {
             // Retune to the operator's TX frequency before keying. Fall
             // back to the RX frequency if addr 0x01 was never received.
