@@ -64,3 +64,4 @@ organized roughly from the hardware up:
 
 - Inspired by Ashhar Farhan's (VU2ESE) original sbitx code
 - Code was based on JJ's 64-bit repository at https://github.com/drexjj/sbitx
+- hpsdrsim.c from the piHPSDR project 
