@@ -8,7 +8,7 @@
 #include <unistd.h>     // usleep() - relay-settling time, not GPIO access
 #include <pthread.h>
 
-int freq_hdr = 7074000;
+int freq_hdr = 7020000;  // for test purposes
 int in_tx = 0;
 // actual crystal filter center probably varies across sbitx and zbitx hardware.
 // The default bfo_freq matches that crstal filter center freq and works on my
@@ -17,8 +17,16 @@ int bfo_freq = 40035000;
 struct vfo lo;
 
 // "Master" gates the WM8731's whole analog output path - the same
-// DAC/output-mixer chain that carries CW (and any future TX) audio out
-#define TX_MASTER_VOL 70
+// DAC/output-mixer chain that carries CW (and any future TX) audio out.
+// Real sbitx's own set_tx_power_levels() (sbitx.c) drives this exact same
+// ALSA control to 95 during TX, with the comment "Muting Master also
+// mutes the PA, killing TX power regardless of the DRIVE setting" -
+// i.e. this isn't a volume knob, it's what gates how much drive actually
+// reaches the exciter/PA. Previously set to 70 here, an unverified guess
+// (see the cw.c sample-scaling comment for the still-open, separate
+// question of whether the digital sample amplitude feeding the DAC is
+// also under-calibrated) - matching sbitx's bench-confirmed 95 instead.
+#define TX_MASTER_VOL 95
 
 void radio_tune_to(uint32_t f) {
     freq_hdr = f;
