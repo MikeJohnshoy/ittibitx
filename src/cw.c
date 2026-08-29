@@ -12,16 +12,11 @@
 // out, nothing more.
 //
 // Table-driven Blackman-Harris attack/decay envelope: 480 samples (5ms
-// at 96kHz, matching the rise time real sbitx's own CW keyer uses,
-// modem_cw.c), rising from ~0 to 1.0. Table-driven on purpose - trying
+// rise and fall time at 96kHz, similar to the implementation in sBitx's own 
+// CW keyer uses in modem_cw.c), rising from ~0 to 1.0. Table-driven so
 // a different keying shape later is a table swap, not a logic change.
-// The same table is walked forward for attack (key down) and backward
+// The same table is used forward for attack (key down) and backward
 // for decay (key up), same trick sbitx's own keyer uses.
-//
-// Key polling: cw_poll_key() is called once per audio block (~10.7ms),
-// not faster - a raw digitalRead() at that cadence is the same approach
-// real sbitx's key_poll() uses (no software debounce), and it naturally
-// absorbs contact bounce (typically a few ms) without extra logic.
 
 #include "cw.h"
 #include "radio.h"
@@ -34,24 +29,6 @@
 // Sidetone/keying pitch - the actual audio-frequency tone injected into
 // the analog exciter (WM8731 DAC -> balanced modulator -> bfo_freq
 // crystal filter). This is what a real CW pitch control would adjust.
-//
-// Deliberately NOT offset by RX_IF_FREQ_HZ. RX_IF_FREQ_HZ (24kHz) is a
-// digital bookkeeping constant used only in sound_process()'s RX I/Q
-// mixing math - it represents where the wanted signal sits relative to
-// Nyquist in the *digital* domain, not a real audio frequency. Real
-// sbitx's own modem_cw.c generates its CW tone at the bare pitch
-// (vfo_start(&cw_tone, cw_pitch_hz, 0), no IF term) for exactly this
-// reason: the crystal filter's actual measured passband is only about
-// +-17.4-18.4kHz wide (see docs/dsp_design_notes/antialias_filter_design.md).
-// Previously adding RX_IF_FREQ_HZ here put the CW tone at a 24.7kHz
-// offset from bfo_freq - deep in the filter's stopband skirt (~-37dB or
-// worse) - while any residual LO/carrier leak-through from the balanced
-// modulator sits at 0Hz offset (filter center, ~0dB), so the wanted
-// keyed tone was arriving far weaker than an unmodulated, envelope-less
-// leak-through carrier. That explains both the off-center dominant peak
-// seen on a TX spectrum capture and a tail that didn't track the CW
-// envelope or hang timer at all - the leak-through carrier stays present
-// for the whole PTT-hold, independent of the envelope shaping.
 #define CW_PITCH_HZ 700
 
 // How many cw_poll_key() calls (audio blocks) to hold TX after the key
@@ -138,7 +115,7 @@ void cw_poll_key(void) {
         if (!tx_active) {
             tx_active = 1;
             radio_set_tx(1);
-            printf("key down!\n");
+            //printf("key down!\n");
         }
         hang_counter = CW_HANG_POLLS;
     } else if (tx_active) {
