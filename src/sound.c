@@ -31,7 +31,7 @@ static pthread_t  audio_thread;
 static volatile int g_running = 0;
 
 /* ------------------------------------------------------------------ */
-/*  ALSA mixer helper - unchanged from sbitx / ma_sound.c              */
+/*  ALSA mixer helper                                                 */
 /* ------------------------------------------------------------------ */
 void sound_mixer(char *card_name, char *element, int make_on)
 {
@@ -183,10 +183,9 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
         i_samples[n] = rf * ((double)lo_i / 1073741824.0);
         q_samples[n] = rf * ((double)lo_q / 1073741824.0);
      
-        // Anti-alias lowpass, applied per rail right after mixing (see
-        // docs/dsp_design_notes/antialias_filter_design.md). Cleans up
-        // the self-image that single-real-ADC-channel I/Q synthesis
-        // produces near the +-48kHz Nyquist edges, without touching the
+        // Anti-alias lowpass, applied to I and Q right after mixing (see
+        // docs/dsp_design_notes/antialias_filter_design.md). Helps clean up
+        // the self-image near the +-48kHz Nyquist edges, without touching the
         // real signal content well within the crystal filter's passband.
         i_samples[n] = antialias_apply(&aa_i, i_samples[n]);
         q_samples[n] = antialias_apply(&aa_q, q_samples[n]);
@@ -223,15 +222,10 @@ static void *audio_loop(void *arg)
         int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sch);
         if (rc != 0) {
             fprintf(stderr,
-                    "sound: WARNING - failed to set audio thread to SCHED_FIFO "
-                    "(%s). This thread needs real-time scheduling to avoid "
-                    "underruns - run as root, or grant CAP_SYS_NICE / an "
-                    "rtprio limit to this binary/user. Falling back to normal "
-                    "scheduling, which will be less reliable.\n",
+                    "sound: WARNING - failed to set audio thread to SCHED_FIFO (%s).\n",
                     strerror(rc));
         }
     }
-
 
     int32_t cap_buf[MAX_FRAMES * CHANNELS];
     int32_t rx_buf[MAX_FRAMES];
