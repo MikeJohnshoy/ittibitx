@@ -59,6 +59,7 @@
 #define TX_DRIVE           50
 #define TX_SAMPLE_HEADROOM (1000000000.0 / (TX_DRIVE * HW_DEFAULT_TX_SCALE))
 #define TX_SAMPLE_CLAMP    2000000000.0   // stay well inside int32 range
+#define TX_GAIN_CORRECTION 4.0
 
 /* ------------------------------------------------------------------ */
 /*  Module state                                                      */
@@ -300,7 +301,7 @@ static void *audio_loop(void *arg)
                 // comment above) - looked up once per block, not per
                 // sample, since freq_hdr doesn't change mid-block.
                 double band_scale = hw_settings_tx_scale(freq_hdr);
-                double amp = TX_SAMPLE_HEADROOM * TX_DRIVE * band_scale;
+                double amp = TX_SAMPLE_HEADROOM * TX_DRIVE * band_scale * TX_GAIN_CORRECTION;
 
                 for (int i = 0; i < n; i++) {
                     double s = cw_get_sample();
