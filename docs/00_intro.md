@@ -10,6 +10,11 @@ application — Quisk, SDR Console, WSJT-X's rig-control layer, etc. — does
 everything downstream of that: FFT display and waterfall, demodulation of
 whatever mode is in use, filtering, and audio routing.
 
+The sBitx code base grew to support multiple operating modes with a powerful
+user interface. My goal was to strip out everything but what was needed to make the
+hardware work right, and leave as much as possible of the signal processing and user-interface
+to the growing collection of high quality SDR applications.  
+
 ## What this is not
 
 minibitx has no onboard demodulation, no waterfall, and no mode logic.
@@ -23,11 +28,10 @@ hardware, and runs stand-alone.
 ## Status
 
 Receive works: antenna to baseband I/Q, streamed over HPSDR and/or USB
-audio, remotely tunable via rigctld. Transmit does not yet: the PTT/relay
-sequencing exists (`radio_set_tx()`), but there is no TX audio path — no
-upsampling, no TX I/Q ring buffer, nothing feeding a modulator. See
-[`03_tx_processing_pipeline.md`](03_tx_processing_pipeline.md) for the
-specifics of what's there and what isn't.
+audio, remotely controlled by HPSDR Protocol 1 or tunable via rigctld. 
+
+Transmit does not yet: I am trying to get a CW waveform out to the antennal
+but it does not work yet.
 
 ## How the rest of these docs are organized
 
