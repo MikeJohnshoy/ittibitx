@@ -1,7 +1,6 @@
 # DSP design notes
 
-Home for DSP design notes that have been analyzed and specified but
-aren't necessarily wired into the code yet — measured data, derivations,
+Home for DSP design notes — measured data, derivations,
 and concrete specs to build against, kept separate from the
 "how the shipped code works" docs elsewhere in `docs/`.
 
