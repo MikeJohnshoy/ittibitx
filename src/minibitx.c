@@ -1,7 +1,7 @@
 // minibitx.c
 //
-// A tiny application that initializes the sbitx radio hardware,
-// and allows a remote SDR application to control its operation over the network using
+// A tiny application that initializes the sbitx radio hardware, and allows 
+// a remote SDR application to control its operation over the network using
 // a subset of openHPSDR Protocol 1 and/or HAMLIB / rigctl.
 
 #include "hpsdr_p1.h"
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
   printf("init: RX VFO started, tuned to %d Hz\n", freq_hdr);
 
   // Straight-key CW support (src/cw.c) - needs the phase table above
-  // already built, since it starts its own sidetone oscillator.
+  // already built, since it starts its software oscillator.
   cw_init();
   printf("init: CW straight key ready (GPIO %d)\n", CW_KEY);
 
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
   status_print();
   if (isatty(fileno(stdout))) putchar('\n');
 
-  // Idle loop: keep the program alive. Operational state changes (tuning,
+  // minibitx dle loop: keep the program alive. Operational state changes (tuning,
   // PTT) are reported as they're processed by hamlib.c/hpsdr_p1.c, not
   // polled here.
   while (1) {
