@@ -2,6 +2,8 @@
 #ifndef HW_SETTINGS_H
 #define HW_SETTINGS_H
 
+void hw_settings_load(void);
+
 // ---- Per-band TX power calibration -------------------------------------
 //
 // hw_settings.ini carries a repeated [tx_band] section per band, each
