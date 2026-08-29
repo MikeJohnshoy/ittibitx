@@ -283,16 +283,6 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 if (cc_addr == 0x01) {
                     uint32_t freq = ((uint32_t)fp[4] << 24) | ((uint32_t)fp[5] << 16) |
                                      ((uint32_t)fp[6] <<  8) |  (uint32_t)fp[7];
-                    // Temporary diagnostic: does this slot's own C0 byte
-                    // (specifically bit0, which the MOX check below reads
-                    // from every frame regardless of address) happen to
-                    // read 1 whenever this address shows up? If so, that's
-                    // the retune-to-last_tx_freq oscillation's real cause -
-                    // not a genuine MOX assertion, just this address's own
-                    // C0 byte incidentally carrying bit0=1.
-                    if (freq && freq != last_tx_freq)
-                        printf("hpsdr: addr 0x01 TX-VFO update -> %u Hz (frame %d, C0=0x%02X)\n",
-                               freq, frame, fp[3]);
                     if (freq) last_tx_freq = freq;
                 }
 
@@ -302,12 +292,21 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                                      ((uint32_t)fp[6] <<  8) |  (uint32_t)fp[7];
                     if (freq) last_rx_freq = freq;
                 }
-
-                // MOX (PTT): some SDR apps key PTT through bit 0 of C0
-                // even while using CAT for everything else. Edge-triggered
-                // since this C&C byte arrives on every frame, but
-                // radio_set_tx() drives GPIO with settling delays, so only
-                // call it when the requested state actually changes.
+                // MOX (PTT) is only defined on C&C register (address) 0 -
+                // every other address carries entirely unrelated register
+                // data (VFO, filters, mode, etc.), and bit0 there means
+                // whatever THAT register encodes, not PTT. Bench testing
+                // (see the addr/C0 values logged here previously) showed
+                // "MOX" transitions firing from addresses like 0x3A, 0x08,
+                // 0x09, 0x06 - essentially random noise from SDR Console's
+                // normal round-robin status traffic, not real PTT
+                // commands - which is what made the CW key look "stuck":
+                // each spurious transition retuned the radio to
+                // last_tx_freq and back, over and over, independent of
+                // the physical key. Gating on addr 0x00 is the fix.
+                if (cc_addr != 0x00)
+                    continue;
+             
                 int want_tx = (fp[3] & 0x01) ? 1 : 0;
 
                 // Defer to the local key completely while it's holding
@@ -330,17 +329,7 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                             radio_tune_to(tx_freq);
                     }
                     radio_set_tx(want_tx);
-                    // Temporary diagnostic: which frame/address carried
-                    // this transition, plus the raw C0 byte. Per the
-                    // usual HPSDR convention MOX (bit0) should read the
-                    // same on every host->radio frame regardless of
-                    // address - if this line keeps showing addr 0x01
-                    // (TX VFO) rather than addr 0x00, that address's C0
-                    // byte is what's actually driving these, not a
-                    // genuine, address-independent PTT bit. Pull this
-                    // back out once that's confirmed one way or another.
-                    printf("hpsdr: MOX -> %s (frame %d, addr 0x%02X, C0=0x%02X)\n",
-                           want_tx ? "TX on" : "TX off", frame, cc_addr, fp[3]);
+                    printf("hpsdr: MOX -> %s\n", want_tx ? "TX on" : "TX off");
                 }
             }
 
