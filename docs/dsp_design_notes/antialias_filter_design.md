@@ -44,12 +44,14 @@ lower skirt rolling off more slowly.
 
 ## 3. bfo_freq correction
 
-`radio.c` previously set `bfo_freq = 40035000` (40.035 MHz). The measured
-center (see above data) is 40.0124 MHz - a 22.6kHz discrepancy, larger than the filter's
-own -3dB half-width (~17.4-17.5kHz). This has been corrected to
-`bfo_freq = 40012400`, so the desired signal now lands centered in the
-real passband rather than skewed toward one skirt. All analysis below
-assumes this corrected centering (i.e., the crystal filter's response,
+The bfo_freq is selected to to put the crystal filter in the center
+of the IF.  `radio.c` previously set `bfo_freq = 40035000` (40.035 MHz) which seems
+to disagree with the data-sheet value for the 
+center (see above data,  40.0124 MHz - a 22.6kHz discrepancy, larger than the filter's
+own -3dB half-width (~17.4-17.5kHz).  Not having test equipment, I simply experimented with
+different values,  and found that for the filter in my radio 40.035 worked well.
+This value can be tweaked by the end user by setting the bfo_freq value in hw_settings.ini.
+All analysis below assumes this corrected centering (i.e., the crystal filter's response,
 mapped onto the digital 24kHz IF, is now symmetric about 24kHz).
 
 ## 4. How much does the analog filter already help at Nyquist?
@@ -88,7 +90,7 @@ applied identically and independently to the I and Q rails (a plain
 real-coefficient lowpass FIR run twice, once per rail) - not before
 mixing, and not as anything more exotic than a standard lowpass.
 
-Goal, given the "maximize usable spectrum, no decimation" directive:
+Goal, given the "maximize usable spectrum, no decimation" objectives as
 preserve as much of the crystal filter's real, delivered bandwidth as
 possible (out past the -3dB corner at 17.4-17.5kHz, into the shoulder
 where the analog filter is already rolling off but still passing real
@@ -98,7 +100,10 @@ Nyquist wall where aliasing risk actually exists.
 ## 6. Design exploration
 
 Using `scipy.signal.remez` (the same Parks-McClellan equiripple method
-now used for the 64bit sbitx LPF), at Fs=96kHz:
+now used for the 64bit sbitx LPF), at Fs=96kHz we can choose, trading of filter flatness,
+transitions width dna stopband depth.  This stopband performance comes on top
+of the crystal filter, so it feels like there is plenty of rejection for any digital 
+artifacts.
 
 | Fpass | Fstop | Transition width | Taps needed for solid performance |
 |---|---|---|---|
@@ -106,13 +111,10 @@ now used for the 64bit sbitx LPF), at Fs=96kHz:
 | 30 kHz | 47.0 kHz | 17.0 kHz | 21 taps -> -92.3dB stopband, 0.004dB ripple |
 | 32 kHz | 47.5 kHz | 15.5 kHz | 21 taps -> -81.2dB stopband, 0.015dB ripple |
 
-All three are remarkably cheap - a handful of taps - because of the huge
+All three are remarkably cheap with respect to performance impact- a
+handful of taps - because of the huge
 natural guard band this architecture has between the wanted signal and
-the Nyquist edge. (Note: `scipy.signal.remez` fails to converge on
-these same band edges at higher tap counts like 61+, because the
-transition is so wide relative to the requested filter length that the
-equiripple exchange becomes over-specified - not a sign anything is
-wrong, just confirmation that far fewer taps than that are needed here.)
+the Nyquist edge. 
 
 Given the "maximize usable spectrum" priority, the widest-passband
 option (32kHz/47.5kHz) is chosen: it preserves essentially all
@@ -162,12 +164,12 @@ response (red). The combined trace shows a clean, wide passband out to
 about 32kHz before rolling off sharply to a deep null well before
 48kHz - exactly the intended shape.
 
-## 9. Implementation note (not yet done)
+## 9. Implementation
 
-This FIR has not been added into `sound.c` yet. When it is: run as a
-real-coefficient convolution applied separately to the `i_samples[]` and
+This FIR has been added into `sound.c`amd is applied separately to the `i_samples[]` and
 `q_samples[]` arrays in `sound_process()`, after the mixing step and
 before `hpsdr_send_iq()`/`uac_push_iq()`. Because the filter is
 symmetric, only 11 distinct multiplies are needed per output sample
 (exploit `h[i] == h[20-i]` by summing paired input samples before
-multiplying), not 21.
+multiplying), not 21.  The code is ready for gcc optimization and should be 
+quite easy on on the raspberry pi processors.
