@@ -2,13 +2,9 @@
 //
 // Straight-key CW support: polls a physical key wired into GPIO
 // (radio_hw.h's CW_KEY line), holds PTT/the T/R relay for the duration
-// of a keying burst, and generates a single sidetone gated by a
-// table-driven envelope so key-down/key-up transitions don't click.
-//
-// Deliberately narrow - no iambic/paddle keyer logic lives here; that's
-// an external keyer's job (its output is just another on/off contact
-// into the same key line). minibitx stays a support layer for external
-// SDR apps, not a full transceiver - this gets clean dots and dashes
+// of a keying burst, and generates a single tone gated by a
+// table-driven envelope. minibitx stays a support layer for external
+// SDR apps so there is no iambic keyer, no macros - this gets clean dots and dashes
 // out, nothing more.
 //
 // Table-driven Blackman-Harris attack/decay envelope: 480 samples (5ms
