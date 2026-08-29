@@ -15,7 +15,7 @@
 #include <alsa/asoundlib.h>
 
 /* ------------------------------------------------------------------ */
-/*  Constants                                                          */
+/*  Constants                                                         */
 /* ------------------------------------------------------------------ */
 #define SAMPLE_RATE      96000
 #define CHANNELS         2        /* stereo: L = RX / R = Mic (capture) */
@@ -23,7 +23,7 @@
 #define MAX_FRAMES       4096
 
 /* ------------------------------------------------------------------ */
-/*  Module state                                                       */
+/*  Module state                                                      */
 /* ------------------------------------------------------------------ */
 static snd_pcm_t *pcm_capture  = NULL;
 static snd_pcm_t *pcm_playback = NULL;
@@ -86,7 +86,7 @@ void setup_audio_codec(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  ALSA PCM helpers                                                   */
+/*  ALSA PCM helpers                                                  */
 /* ------------------------------------------------------------------ */
 static snd_pcm_t *open_pcm(const char *dev, snd_pcm_stream_t dir)
 {
@@ -204,28 +204,11 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
 }
 
 /* ------------------------------------------------------------------ */
-/*  Audio thread - capture -> sound_process() -> playback               */
+/*  Audio thread - capture -> sound_process() -> playback             */
 /* ------------------------------------------------------------------ */
 static void *audio_loop(void *arg)
 {
     (void)arg;
-
-    // Real-time priority: as an ordinary SCHED_OTHER thread this competes
-    // with everything else on the system and can be preempted long enough
-    // to miss an ALSA period. zbitx's sbitx_sound.c hit underruns from the
-    // same cause and fixed it by bumping the audio thread to SCHED_FIFO -
-    // do the same here. Not fatal if it fails (no root / no CAP_SYS_NICE /
-    // no rtprio limit) - just warn and keep running at normal priority.
-    {
-        struct sched_param sch;
-        sch.sched_priority = sched_get_priority_max(SCHED_FIFO);
-        int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sch);
-        if (rc != 0) {
-            fprintf(stderr,
-                    "sound: WARNING - failed to set audio thread to SCHED_FIFO (%s).\n",
-                    strerror(rc));
-        }
-    }
 
     int32_t cap_buf[MAX_FRAMES * CHANNELS];
     int32_t rx_buf[MAX_FRAMES];
@@ -297,7 +280,7 @@ static void *audio_loop(void *arg)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public API                                                         */
+/*  Public API                                                        */
 /* ------------------------------------------------------------------ */
 int sound_thread_start(const char *device_name)
 {
@@ -316,7 +299,36 @@ int sound_thread_start(const char *device_name)
     }
 
     g_running = 1;
-    if (pthread_create(&audio_thread, NULL, audio_loop, NULL) != 0) {
+    
+    // Real-time priority: as an ordinary SCHED_OTHER thread the audio
+    // thread competes with everything else on the system and can be
+    // preempted long enough to miss an ALSA period. zbitx's sbitx_sound.c
+    // hit underruns from the same cause and fixed it by bumping the audio
+    // thread to SCHED_FIFO - do the same here, requested up front via
+    // pthread_attr_t so pthread_create() itself fails fast (typically
+    // EPERM) if we don't have the privilege, rather than the thread
+    // silently falling back to normal scheduling well after this
+    // function - and main()'s "ready to serve!" line - have already
+    // returned. Not fatal if it fails (no root / no CAP_SYS_NICE / no
+    // rtprio limit) - just warn here, synchronously, and retry with
+    // default (SCHED_OTHER) attributes.
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+    pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+    struct sched_param sch = { .sched_priority = sched_get_priority_max(SCHED_FIFO) };
+    pthread_attr_setschedparam(&attr, &sch);
+
+    int rc = pthread_create(&audio_thread, &attr, audio_loop, NULL);
+    if (rc != 0) {
+        fprintf(stderr,
+                "sound: WARNING - failed to set audio thread to SCHED_FIFO (%s). "
+                "Falling back to normal scheduling.\n", strerror(rc));
+        rc = pthread_create(&audio_thread, NULL, audio_loop, NULL);
+    }
+    pthread_attr_destroy(&attr);
+
+    if (rc != 0) {
         fprintf(stderr, "sound: pthread_create failed\n");
         snd_pcm_close(pcm_capture);
         pcm_capture = NULL;
