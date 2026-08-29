@@ -1,6 +1,6 @@
 # DSP design notes
 
-Home for DSP design write-ups that have been analyzed and specified but
+Home for DSP design notes that have been analyzed and specified but
 aren't necessarily wired into the code yet — measured data, derivations,
 and concrete specs to build against, kept separate from the
 "how the shipped code works" docs elsewhere in `docs/`.
@@ -14,3 +14,5 @@ already used in `antialias_filter_design.md`.
 - [`antialias_filter_design.md`](antialias_filter_design.md) — measured
   crystal filter response and a proposed FIR anti-alias filter spec for
   the RX chain. Status: proposed, not yet implemented in `sound.c`.
+- 
+-  
