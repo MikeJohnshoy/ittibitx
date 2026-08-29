@@ -35,11 +35,6 @@ listens for control connections — a rigctld-compatible server on TCP
 client at this Pi's IP, and (optionally) its CAT/rig control at
 `127.0.0.1:4532` with rig model "Hamlib NET rigctl" for live retuning.
 
-## Updating
-
-`./update` stashes any local changes, pulls the latest commits, and
-reports success — run it from the same directory as this README.
-
 ## Documentation
 
 The `docs/` folder has the detailed breakdown of how minibitx works,
