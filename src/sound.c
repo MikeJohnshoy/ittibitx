@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
 #include <alsa/asoundlib.h>
 
 /* ------------------------------------------------------------------ */
@@ -210,6 +211,28 @@ static void *audio_loop(void *arg)
 {
     (void)arg;
 
+    // Real-time priority: as an ordinary SCHED_OTHER thread this competes
+    // with everything else on the system and can be preempted long enough
+    // to miss an ALSA period. zbitx's sbitx_sound.c hit underruns from the
+    // same cause and fixed it by bumping the audio thread to SCHED_FIFO -
+    // do the same here. Not fatal if it fails (no root / no CAP_SYS_NICE /
+    // no rtprio limit) - just warn and keep running at normal priority.
+    {
+        struct sched_param sch;
+        sch.sched_priority = sched_get_priority_max(SCHED_FIFO);
+        int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sch);
+        if (rc != 0) {
+            fprintf(stderr,
+                    "sound: WARNING - failed to set audio thread to SCHED_FIFO "
+                    "(%s). This thread needs real-time scheduling to avoid "
+                    "underruns - run as root, or grant CAP_SYS_NICE / an "
+                    "rtprio limit to this binary/user. Falling back to normal "
+                    "scheduling, which will be less reliable.\n",
+                    strerror(rc));
+        }
+    }
+
+
     int32_t cap_buf[MAX_FRAMES * CHANNELS];
     int32_t rx_buf[MAX_FRAMES];
     int32_t mic_buf[MAX_FRAMES];
@@ -243,16 +266,33 @@ static void *audio_loop(void *arg)
         // actually notices the key going down in the first place.
         cw_poll_key();
 
-        if (cw_tx_active() && pcm_playback) {
-            for (int i = 0; i < n; i++) {
-                double s = cw_get_sample();
-                // Headroom below full-scale int32; the right drive level
-                // for the balanced modulator needs a bench check, this
-                // is a starting point, not a calibrated value.
-                int32_t v = (int32_t)(s * 1000000000.0);
-                play_buf[i * 2]     = v;   // L
-                play_buf[i * 2 + 1] = v;   // R - WM8731 output is stereo,
-                                           // sidetone is mono, duplicate it
+        // Feed pcm_playback every block, TX or not - not just while a CW
+        // burst is active. ALSA's underrun detection isn't tied to whether
+        // writei() gets called; it's the hardware clock draining the ring
+        // buffer against the software pointer. Only writing during a burst
+        // meant the device sat with nothing arriving for however long the
+        // key was up (seconds, easily), so its ~43ms buffer drained and it
+        // underran on its own between every single burst - then the first
+        // write of the next burst hit that stale underrun and had to
+        // recover, which is exactly the "xrun, recovering" storm logged on
+        // every key-down. Writing silence the rest of the time keeps the
+        // device continuously running so it never gets the chance to idle
+        // out - the same continuously-fed design real sbitx's own full
+        // duplex audio path uses.
+        if (pcm_playback) {
+            if (cw_tx_active()) {
+                for (int i = 0; i < n; i++) {
+                    double s = cw_get_sample();
+                    // Headroom below full-scale int32; the right drive level
+                    // for the balanced modulator needs a bench check, this
+                    // is a starting point, not a calibrated value.
+                    int32_t v = (int32_t)(s * 1000000000.0);
+                    play_buf[i * 2]     = v;   // L
+                    play_buf[i * 2 + 1] = v;   // R - WM8731 output is stereo,
+                                               // sidetone is mono, duplicate it
+                }
+            } else {
+                memset(play_buf, 0, (size_t)n * 2 * sizeof(int32_t));
             }
             snd_pcm_sframes_t wframes = snd_pcm_writei(pcm_playback, play_buf, n);
             if (wframes < 0) xrun_recover(pcm_playback, (int)wframes);
