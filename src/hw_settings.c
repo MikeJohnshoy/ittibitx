@@ -29,6 +29,7 @@ void hw_settings_load(void) {
     printf("init: %s not found, using compiled-in defaults\n", HW_SETTINGS_PATH);
     return;
   }
+  printf("init: %s found, reading calibration settings\n", HW_SETTINGS_PATH);
 
   enum hw_section section = HW_SECTION_TOP;
   char line[256];
@@ -38,7 +39,8 @@ void hw_settings_load(void) {
     while (isspace((unsigned char)*p))
       p++;
 
-    continue; // comment or blank line
+    if (*p == '#' || *p == '\0' || *p == '\n')
+      continue; // comment or blank line
 
     if (*p == '[') {
       char name[32];
