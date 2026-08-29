@@ -6,8 +6,6 @@
 #include "i2c.h"
 #include "radio_hw.h"
 
-#define DEBUG 0
-
 /* ---- INA260 power monitor (I2C address 0x40) -------------------------- */
 
 #define INA260_ADDRESS   0x40
@@ -74,24 +72,14 @@ void set_lpf_40mhz(int frequency)
 
 	if (lpf == prev_lpf)
 	{
-#if DEBUG > 0
-		puts("LPF not changed");
-#endif
 		return;
 	}
-
-#if DEBUG > 0
-	printf("##################Setting LPF to %d\n", lpf);
-#endif
 
 	digitalWrite(LPF_A, LOW);
 	digitalWrite(LPF_B, LOW);
 	digitalWrite(LPF_C, LOW);
 	digitalWrite(LPF_D, LOW);
 
-#if DEBUG > 0
-	printf("################ setting %d high\n", lpf);
-#endif
 	digitalWrite(lpf, HIGH);
 	prev_lpf = lpf;
 	printf("LPF: selected pin %d for %d Hz\n", lpf, frequency);
