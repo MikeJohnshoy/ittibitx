@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include "hamlib.h"
+#include "cw.h"
 
 extern int freq_hdr;    // current frequency, Hz - see radio.h
 extern int in_tx;       // 0 = RX, 1 = TX - see radio.h
@@ -106,6 +107,11 @@ static int handle_line(int fd, char *line)
         // mic/data distinction, so anything nonzero means TX.
         long v = strtol(cmd + 1, NULL, 10);
         int tx_on = (v != 0);
+        if (cw_tx_active()) {
+            send_rprt(fd, 0);
+            printf("rigctl: T %ld -> ignored, local CW key holds TX\n", v);
+            return 0;
+       }
         radio_set_tx(tx_on);
         send_rprt(fd, 0);
         printf("rigctl: T %ld -> %s\n", v, tx_on ? "TX on" : "TX off");
