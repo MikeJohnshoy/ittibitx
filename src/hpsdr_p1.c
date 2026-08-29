@@ -308,7 +308,7 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
     case 0x04:  // Start / stop streaming - always exactly 64 bytes.
         {
             if (len != 64) break;
-+
+
             int start = ((buf[3] & 0x01) != 0) || (buf[3] != 0x00);
         
             if (start) {
