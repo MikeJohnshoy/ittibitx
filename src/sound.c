@@ -7,6 +7,7 @@
 #include "usb_gadget.h"
 #include "antialias.h"
 #include "cw.h"
+#include "hw_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,43 @@
 #define CHANNELS         2        /* stereo: L = RX / R = Mic (capture) */
 #define PERIOD_FRAMES    1024     /* frames per period (matches old cfg) */
 #define MAX_FRAMES       4096
+
+/* ------------------------------------------------------------------ */
+/*  TX sample scaling - see hw_settings.h for the per-band 'scale'      */
+/*  calibration table this is anchored against                         */
+/* ------------------------------------------------------------------ */
+//
+// cw_get_sample() returns a value roughly in [-1, 1] (tone * envelope).
+// Converting that to an int32 PCM sample used to be one flat, guessed
+// constant (1e9) for every band - this replaced it with hw_settings.ini's
+// real, bench-calibrated per-band 'scale' table (see hw_settings.h),
+// so bands that need more drive (per real sbitx's own measurements of
+// this exact board's PA gain rolling off toward 10m) actually get more,
+// instead of every band getting the same guess.
+//
+// TX_DRIVE mirrors real sbitx's "drive" setting (0-100) - minibitx has
+// no live UI/command to adjust it yet, so it's fixed at the same value
+// (50) the hw_settings.ini scale table was itself calibrated against
+// (bench-confirmed 5W on 40m at drive=50), so the table's numbers mean
+// what they were measured to mean.
+//
+// TX_SAMPLE_HEADROOM is anchored so that the reference band (40m,
+// HW_DEFAULT_TX_SCALE = 0.00115) reproduces the exact same PCM amplitude
+// as the old flat 1e9 constant - i.e. today's already-tested 40m output
+// level doesn't change. Other bands scale up or down from there
+// following the real per-band ratios in the table. IMPORTANT: those
+// ratios span roughly 14x across the table (0.00075 on 80m to 0.0107 on
+// 10m), so on the high end this can legitimately call for several times
+// more amplitude than 40m - TX_SAMPLE_CLAMP exists specifically to stop
+// that from wrapping around int32 range rather than just clipping.
+// Real sbitx's own numbers were bench-verified against a wattmeter; this
+// mapping onto minibitx's completely different (non-FFT) sample pipeline
+// has not been - treat the *shape* across bands as trustworthy (it's
+// real measured data) and the *absolute* level as still needing a bench
+// or on-air check, the same as the constant it replaces.
+#define TX_DRIVE           50
+#define TX_SAMPLE_HEADROOM (1000000000.0 / (TX_DRIVE * HW_DEFAULT_TX_SCALE))
+#define TX_SAMPLE_CLAMP    2000000000.0   // stay well inside int32 range
 
 /* ------------------------------------------------------------------ */
 /*  Module state                                                      */
@@ -258,12 +296,18 @@ static void *audio_loop(void *arg)
         // duplex audio path uses.
         if (pcm_playback) {
             if (cw_tx_active()) {
+                // Per-band calibrated scale (see the TX_SAMPLE_HEADROOM
+                // comment above) - looked up once per block, not per
+                // sample, since freq_hdr doesn't change mid-block.
+                double band_scale = hw_settings_tx_scale(freq_hdr);
+                double amp = TX_SAMPLE_HEADROOM * TX_DRIVE * band_scale;
+
                 for (int i = 0; i < n; i++) {
                     double s = cw_get_sample();
-                    // Headroom below full-scale int32; the right drive level
-                    // for the balanced modulator needs a bench check, this
-                    // is a starting point, not a calibrated value.
-                    int32_t v = (int32_t)(s * 1000000000.0);
+                    double raw = s * amp;
+                    if (raw > TX_SAMPLE_CLAMP) raw = TX_SAMPLE_CLAMP;
+                    if (raw < -TX_SAMPLE_CLAMP) raw = -TX_SAMPLE_CLAMP;
+                    int32_t v = (int32_t)raw;
                     play_buf[i * 2]     = v;   // L
                     play_buf[i * 2 + 1] = v;   // R - WM8731 output is stereo,
                                                // sidetone is mono, duplicate it
