@@ -15,7 +15,7 @@ remains, while preserving as much usable spectrum as possible.
 
 This data is from the spec sheet from a 
 network analyzer sweep for the actual installed crystal filter.  This design doc
-was provided by Evan Ac9TU as we were looking at the zbitx radio performance.  It may
+was provided by Evan AC9TU as we were looking at the zbitx radio performance.  It may
 or may not be the same as is in the sbitx boards, but it is at least representative.
 
 | Parameter | Value |
