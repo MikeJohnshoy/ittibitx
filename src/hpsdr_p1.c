@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
+#include <stdatomic.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <pthread.h>
@@ -16,17 +18,113 @@
 #define HPSDR_PKT_SIZE 1032
 #define SAMPLES_PER_PACKET 126
 
+// --- Packet pacing -----------------------------------------------------
+// Measured with the instrumentation above (2026-08): hpsdr_send_iq() was
+// handing sound.c's whole ~1024-sample audio-thread block to
+// build_and_send_packet() in one tight loop, which fired all ~9 packets
+// that block completes back-to-back within ~1ms (packet-to-packet gaps
+// of 20-80us), then sent nothing for the remaining ~10.4ms until the
+// next block arrived - a bursty "9 packets, then silence" pattern
+// instead of the roughly-steady one-packet-every-1.3ms cadence real
+// HPSDR hardware naturally produces (it's dedicated streaming hardware;
+// minibitx's audio thread instead does all its work for one block, then
+// blocks on the next ALSA read). SDR Console tolerates this; SparkSDR's
+// jitter buffer/AGC apparently does not - this is the leading suspect
+// for the ~170ms audio warble reported against SparkSDR specifically
+// (see docs/dsp_design_notes - both apps get the same IQ content, only
+// its arrival timing differs from what real hardware would produce).
+//
+// FIRST ATTEMPT (reverted): usleep() between packets inside
+// hpsdr_send_iq(), called directly from the audio thread. This was
+// wrong, not just risky - it produced immediate, continuous "sound:
+// xrun, recovering" errors. The reasoning behind it ("the capture
+// buffer is 4 periods deep, so there's slack to spend") confused two
+// different things: buffer depth absorbs occasional, one-off jitter
+// (a single late iteration), but it cannot absorb a PERMANENT rate
+// mismatch. snd_pcm_readi(pcm_capture, cap_buf, PERIOD_FRAMES) already
+// consumes the entire ~10.667ms period as real wall-clock time (that's
+// what pacing the loop to real time means); adding ~7-8ms of usleep()
+// on top of that, every single iteration, made each loop iteration take
+// ~17-18ms of wall-clock time while the hardware kept producing audio
+// every 10.667ms regardless. That's not jitter, it's a standing ~7ms/
+// iteration deficit - the capture ring buffer (4 periods, ~42.7ms)
+// fills the backlog in about 6 iterations and overruns forever after,
+// exactly matching the immediate, continuous xruns actually seen.
+// Any delay inserted directly in this thread is real: the audio thread
+// must be back at its next snd_pcm_readi() well within one period, with
+// no exceptions.
+//
+// REAL FIX, TAKE 2: a mutex-protected queue (the first version of this
+// fix) was STILL wrong, for a related but different reason - it caused
+// the exact same continuous xrun symptom all over again. sound.c's
+// audio thread runs SCHED_FIFO at the maximum RT priority specifically
+// because zbitx's sbitx_sound.c hit underruns from ordinary scheduling
+// delays (see open_pcm()'s neighbor, the pthread_create() call in
+// sound.c around its "Real-time priority" comment). A plain pthread
+// mutex shared between that max-priority thread and this file's
+// ordinary SCHED_OTHER pacer thread is a textbook priority-inversion
+// trap: the ordinary-priority pacer thread can be descheduled by the
+// kernel for an arbitrary stretch while it holds the lock (page
+// activity, other SCHED_OTHER threads, anything), and because the
+// default Linux pthread mutex has no priority-inheritance protocol,
+// the SCHED_FIFO audio thread just has to wait however long that
+// takes - which, happening on every single hpsdr_send_iq() call,
+// reproduces the identical "real thread falls behind real time, buffer
+// fills, xruns forever" failure as the original usleep() attempt, just
+// via lock contention instead of a literal sleep.
+//
+// So: no mutex, no blocking call of any kind on the audio-thread side,
+// full stop. This is a classic lock-free single-producer/single-
+// consumer ring buffer instead - the audio thread (producer) only ever
+// WRITES q_head and only ever READS q_tail; the pacer thread (consumer)
+// only ever WRITES q_tail and only ever READS q_head. Neither side can
+// block the other: the producer can always advance q_head (worst case,
+// it drops samples that don't fit rather than wait for the consumer to
+// catch up - see hpsdr_send_iq()), and the consumer just sees however
+// much is available each tick. IQ_QUEUE_CAP is a power of two so the
+// wraparound is a cheap bitmask instead of a modulo.
+#define IQ_QUEUE_CAP        4096   // samples (~42.7ms @ 96kHz) - comfortably
+                                   // more than one bursty audio-thread block
+                                   // (~1024-1040 samples), so the queue just
+                                   // smooths the burst into an even drain
+                                   // rather than ever running dry or full
+                                   // in normal operation. Must stay a power
+                                   // of two - see IQ_QUEUE_MASK.
+#define IQ_QUEUE_MASK       (IQ_QUEUE_CAP - 1)
+#define PACKET_INTERVAL_NS  1312500L   // 126 samples / 96000 Hz, exact
+
 static int hpsdr_sock = -1;
 static struct sockaddr_in stream_dest;
 static volatile int client_active = 0;
 static volatile int running = 0;
 static uint32_t tx_seq = 0;
 static pthread_t poll_thread;
+static pthread_t pacer_thread;
 
-// IQ accumulation buffer for 126 samples (48kHz)
+// Lock-free SPSC IQ ring buffer between the audio thread (producer,
+// hpsdr_send_iq()) and the pacer thread (consumer,
+// hpsdr_pacer_thread()). q_head is written only by the producer, q_tail
+// only by the consumer (or, on a fresh connect, caught up to q_head by
+// the consumer at the poll thread's request - see reset_requested
+// below); both sides read the other's index with acquire/release
+// ordering so the sample data itself is always visible before the
+// index publishing it is.
+static double q_i[IQ_QUEUE_CAP];
+static double q_q[IQ_QUEUE_CAP];
+static atomic_uint q_head = 0;
+static atomic_uint q_tail = 0;
+
+// Set (by the poll thread, on a fresh EP1 START) to ask the pacer
+// thread to drop whatever's queued. Only ever written by the poll
+// thread and consumed (via exchange) by the pacer thread - neither the
+// audio thread nor this flag's own writer ever touch q_head/q_tail
+// directly, preserving the single-writer-per-index invariant above.
+static atomic_int reset_requested = 0;
+
+// One packet's worth of samples, filled from the queue by the pacer
+// thread immediately before each build_and_send_packet() call.
 static double iq_buf_i[SAMPLES_PER_PACKET];
 static double iq_buf_q[SAMPLES_PER_PACKET];
-static int iq_buf_count = 0;
 static double hpsdr_iq_gain = 1.0;  // <<<<< add gain to I and Q data going out
 
 extern void radio_set_tx(int tx_on);
@@ -155,26 +253,105 @@ static void build_and_send_packet(void)
 
 // --- Main Audio Thread Hook -------------------------------------------------
 
-// Called continuously with 48kHz samples from the RX processing chain.
-// No filtering or decimation required; just gain and packetization.
+// Called once per audio-thread iteration (sound.c's SAMPLE_RATE is
+// 96kHz; "48kHz" in an earlier version of this comment was stale) with
+// that iteration's whole block of RX samples. No filtering or
+// decimation required; just gain and packetization.
 //
 // This is sound.c's copy of the IQ for the HPSDR/UDP stream only - it
 // knows nothing about usb_gadget.c, which sound.c feeds separately from
 // its own copy. A no-op whenever no Protocol 1 client is connected.
+//
+// Producer side only: just append to the ring buffer and return. Must
+// stay fast and never block or sleep - this runs on the real-time audio
+// thread, which has to be back at its next snd_pcm_readi() well within
+// one ~10.667ms period (see the packet-pacing comment above). All the
+// actual pacing/sending happens in hpsdr_pacer_thread() instead.
 void hpsdr_send_iq(double *i_samples, double *q_samples, int n)
 {
     if (!client_active || hpsdr_sock < 0) return;
 
-    for (int k = 0; k < n; k++) {
-        iq_buf_i[iq_buf_count] = i_samples[k] * hpsdr_iq_gain;
-        iq_buf_q[iq_buf_count] = q_samples[k] * hpsdr_iq_gain;
-        iq_buf_count++;
+    // Relaxed load: q_head is ours alone (we're the only writer), no
+    // other thread's writes need to be ordered against it here.
+    unsigned head = atomic_load_explicit(&q_head, memory_order_relaxed);
+    // Acquire load: must happen-before reading q_i/q_q[tail..] below (it
+    // doesn't here - we only compare against it - but acquire costs
+    // nothing extra on the architectures this targets and keeps the
+    // pairing consistent with the pacer thread's use of q_head).
+    unsigned tail = atomic_load_explicit(&q_tail, memory_order_acquire);
 
-        if (iq_buf_count >= SAMPLES_PER_PACKET) {
-            build_and_send_packet();
-            iq_buf_count = 0;
+    for (int k = 0; k < n; k++) {
+        unsigned next_head = (head + 1) & IQ_QUEUE_MASK;
+        if (next_head == tail) {
+            // Ring buffer full - the pacer thread has fallen behind by
+            // a full IQ_QUEUE_CAP worth of samples (~42.7ms). Drop this
+            // sample rather than wait for the consumer or touch q_tail
+            // (which only the pacer thread ever writes - see the
+            // lock-free design note above). A brief IQ gap on the
+            // network stream beats blocking this real-time thread.
+            continue;
         }
+        q_i[head] = i_samples[k] * hpsdr_iq_gain;
+        q_q[head] = q_samples[k] * hpsdr_iq_gain;
+        head = next_head;
     }
+
+    // Release store: publishes both the new head index and everything
+    // written to q_i/q_q above it, so the pacer thread's acquire load of
+    // q_head is guaranteed to see the sample data too.
+    atomic_store_explicit(&q_head, head, memory_order_release);
+}
+
+// --- Pacer Thread (Background) -----------------------------------------
+//
+// Drains the ring buffer at a steady, precise one-packet-per-1.3125ms
+// cadence, fully decoupled from the audio thread's bursty production
+// pattern. Uses an absolute wake time advanced by exactly one packet's
+// worth of sample-time each iteration (not a repeated "sleep for X"),
+// so the long-run average rate stays locked to the real sample rate
+// with no cumulative drift no matter how long this runs.
+static void *hpsdr_pacer_thread(void *arg)
+{
+    (void)arg;
+    struct timespec next;
+    clock_gettime(CLOCK_MONOTONIC, &next);
+
+    while (running) {
+        next.tv_nsec += PACKET_INTERVAL_NS;
+        while (next.tv_nsec >= 1000000000L) {
+            next.tv_nsec -= 1000000000L;
+            next.tv_sec++;
+        }
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+
+        if (!client_active || hpsdr_sock < 0) continue;
+
+        // A fresh EP1 START came in on the poll thread since we last
+        // looked - catch q_tail up to the current q_head to drop
+        // whatever was queued from before the connect, instead of the
+        // poll thread touching q_tail itself (see reset_requested).
+        if (atomic_exchange_explicit(&reset_requested, 0, memory_order_relaxed)) {
+            unsigned h = atomic_load_explicit(&q_head, memory_order_acquire);
+            atomic_store_explicit(&q_tail, h, memory_order_release);
+        }
+
+        unsigned head = atomic_load_explicit(&q_head, memory_order_acquire);
+        unsigned tail = atomic_load_explicit(&q_tail, memory_order_relaxed);
+        unsigned available = (head - tail) & IQ_QUEUE_MASK;
+
+        if (available >= SAMPLES_PER_PACKET) {
+            for (int s = 0; s < SAMPLES_PER_PACKET; s++) {
+                iq_buf_i[s] = q_i[tail];
+                iq_buf_q[s] = q_q[tail];
+                tail = (tail + 1) & IQ_QUEUE_MASK;
+            }
+            atomic_store_explicit(&q_tail, tail, memory_order_release);
+            build_and_send_packet();
+        }
+        // else: not enough data yet (e.g. just after connect, before
+        // the queue has filled) - skip this tick and try again next.
+    }
+    return NULL;
 }
 
 // --- Command and Discovery (Background Thread) ------------------------------
@@ -343,7 +520,10 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 if (!same_dest) {
                     stream_dest = *sender;
                     tx_seq = 0;
-                    iq_buf_count = 0;
+                    // Ask the pacer thread to drop whatever's queued -
+                    // it owns q_tail, so it does the actual reset (see
+                    // reset_requested's declaration above).
+                    atomic_store_explicit(&reset_requested, 1, memory_order_relaxed);
                     printf("hpsdr: streaming STARTED cmd=%u to %s:%d\n",
                            (unsigned)buf[3], inet_ntoa(stream_dest.sin_addr), ntohs(stream_dest.sin_port));
                 } else {
@@ -453,6 +633,7 @@ void hpsdr_poll(void)
     static int started = 0;
     if (!started && running) {
         pthread_create(&poll_thread, NULL, hpsdr_poll_thread, NULL);
+        pthread_create(&pacer_thread, NULL, hpsdr_pacer_thread, NULL);
         started = 1;
     }
 }
