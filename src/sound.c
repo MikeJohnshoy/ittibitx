@@ -60,7 +60,7 @@
 #define TX_SAMPLE_HEADROOM (1000000000.0 / (TX_DRIVE * HW_DEFAULT_TX_SCALE))
 #define TX_SAMPLE_CLAMP    2000000000.0   // stay well inside int32 range
 #define TX_GAIN_CORRECTION 4.0
-#define SIDETONE_SCALE 0.10  // local speaker audio level
+#define SIDETONE_SCALE 0.005  // local speaker audio level
 
 /* ------------------------------------------------------------------ */
 /*  Module state                                                      */
