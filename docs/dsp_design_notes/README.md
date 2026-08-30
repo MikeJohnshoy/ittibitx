@@ -13,5 +13,9 @@ already used in `antialias_filter_design.md`.
 - [`antialias_filter_design.md`](antialias_filter_design.md) — measured
   crystal filter response and a proposed FIR anti-alias filter spec for
   the RX chain. Status: proposed, not yet implemented in `sound.c`.
-- 
+- [`tx_power_calibration.md`](tx_power_calibration.md) — why sbitx's
+  per-band TX scale table doesn't transfer to minibitx's saturating CW
+  pipeline unchanged, and a step-by-step wattmeter procedure to
+  re-derive per-band values for flat power. Status: proposed procedure,
+  not yet executed.
 -  
