@@ -305,17 +305,30 @@ static void *audio_loop(void *arg)
                 double amp = TX_SAMPLE_HEADROOM * TX_DRIVE * band_scale * TX_GAIN_CORRECTION;
 
                 for (int i = 0; i < n; i++) {
-                    double s = cw_get_sample();
-                    double raw = s * amp;
-                    if (raw > TX_SAMPLE_CLAMP) raw = TX_SAMPLE_CLAMP;
-                    if (raw < -TX_SAMPLE_CLAMP) raw = -TX_SAMPLE_CLAMP;
-                    int32_t v = (int32_t)raw;
+                    // cw_get_sample() owns the envelope advance for this
+                    // sample - must be called first. cw_get_tx_sample()
+                    // reads the same envelope position but at the
+                    // IF-shifted carrier that lands inside the crystal
+                    // filter's passband instead of producing two RF tones
+                    // (see cw.c's TX_IF_OFFSET_HZ comment).
+                    double sidetone = cw_get_sample();
+                    double tx_wave  = cw_get_tx_sample();
+
+                    // R = the WM8731's PA-feeding channel - the IF-shifted
+                    // TX waveform, at the full wattmeter-calibrated amplitude.
+                    double raw_tx = tx_wave * amp;
+                    if (raw_tx > TX_SAMPLE_CLAMP) raw_tx = TX_SAMPLE_CLAMP;
+                    if (raw_tx < -TX_SAMPLE_CLAMP) raw_tx = -TX_SAMPLE_CLAMP;
+
                     // L = local sidetone monitor only (on-board speaker),
-                    // scaled down independently - see SIDETONE_SCALE above.
-                    // R = the WM8731's PA-feeding channel - keeps the full,
-                    // wattmeter-calibrated TX amplitude, untouched.
-                    play_buf[i * 2]     = (int32_t)(raw * SIDETONE_SCALE);
-                    play_buf[i * 2 + 1] = v;
+                    // at the sidetone pitch, scaled down independently -
+                    // see SIDETONE_SCALE above. Never reaches the PA.
+                    double raw_side = sidetone * amp * SIDETONE_SCALE;
+                    if (raw_side > TX_SAMPLE_CLAMP) raw_side = TX_SAMPLE_CLAMP;
+                    if (raw_side < -TX_SAMPLE_CLAMP) raw_side = -TX_SAMPLE_CLAMP;
+
+                    play_buf[i * 2]     = (int32_t)raw_side;
+                    play_buf[i * 2 + 1] = (int32_t)raw_tx;
                 }
             } else {
                 memset(play_buf, 0, (size_t)n * 2 * sizeof(int32_t));
