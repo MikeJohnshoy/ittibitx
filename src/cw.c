@@ -61,9 +61,20 @@
 // actual measured offset from bfo_freq, so it landed on the wrong side of
 // the skirt. 22600 comes from bfo_freq (40035000) minus this radio's
 // measured filter center (40012400) - it's a starting point for a bench
-// check (key down, watch a spectrum/waterfall for the second tone
-// dropping out), not a value guaranteed correct on every board without
-// verifying against that board's own filter.
+// check, not a value guaranteed correct on every board without verifying
+// against that board's own filter (the measured data behind 22600 came
+// from a different, "representative" unit, not this exact one).
+//
+// TO RE-TUNE ON THE BENCH: this constant only affects TX - no RX
+// implications, unlike bfo_freq, so it's safe to sweep on its own. Try
+// steps of +-2000 to +-4000 Hz around 22600, rebuilding and keying down
+// at the same test frequency each time. Read the *image* suppression
+// off a connected SDR's spectrum/waterfall (compare dB levels between
+// the wanted peak and the residual second tone, same as before) and
+// bisect toward whichever direction deepens the null - no wattmeter
+// needed for this, just the spectrum display. Log trials here as you
+// go, e.g.:
+//   22600 -> ~40dB down (baseline)
 #define TX_IF_OFFSET_HZ 22600
 
 // How many cw_poll_key() calls (audio blocks) to hold TX after the key
@@ -168,8 +179,6 @@ int cw_tx_active(void) {
     return tx_active;
 }
 
-// generate a tone with real cw envelope that we only hear on
-// local audio
 double cw_get_sample(void) {
     if (key_down) {
         if (envelope_pos < CW_ENVELOPE_LEN - 1) envelope_pos++;
@@ -187,7 +196,7 @@ double cw_get_sample(void) {
 // advance it again), but at the IF-shifted carrier frequency instead of
 // the bare sidetone pitch. See TX_IF_OFFSET_HZ above for why. Callers
 // must call cw_get_sample() once per sample first (it owns the envelope
-// advance) and this second, for the sample to upconvert, to keep both the sidetone
+// advance) and this second, for the same sample, to get both the sidetone
 // and the TX drive in sync.
 double cw_get_tx_sample(void) {
     int tone = vfo_read(&cw_tx_carrier);
