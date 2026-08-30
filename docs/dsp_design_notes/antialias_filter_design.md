@@ -1,7 +1,9 @@
 # RX Anti-Alias FIR Filter: Analysis and Design
 
-Status: not yet implemented in code. This document describes the
-crystal filter data and a follow-on FIR filter after mixing down to baseband I&Q.
+Status: implemented (`antialias.c`, wired into `sound_process()` - see
++§9 and [`../02_rx_processing_pipeline.md`](../02_rx_processing_pipeline.md)).
++This document describes the crystal filter data and the FIR filter
++design it justifies, after mixing down to baseband I&Q.
 
 ## 1. Background
 
