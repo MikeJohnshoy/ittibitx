@@ -41,6 +41,7 @@ for RX — same hardware, signal flowing the opposite direction:
      |           balanced modulator: ~23.3kHz carrier mixed onto bfo_freq -
      |           BFO sits at the filter's edge, not its center, so only
      |           the difference product lands in the passband (see below)
+     |           and the sum product lands outside and gets suppressed.
      v
   Crystal filter, fixed at ~bfo_freq  (same filter RX uses)
      |
