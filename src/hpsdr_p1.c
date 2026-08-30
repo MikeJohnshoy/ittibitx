@@ -198,16 +198,6 @@ void hpsdr_send_iq(double *i_samples, double *q_samples, int n)
 // stale, already-unchanged network value look like a fresh request the
 // moment the key released TX, latching it on permanently. See the
 // cc_addr and net_mox comments in process_ep2_frame() for both fixes.
-// Tracks the host->radio EP2 sequence number (bytes 4-7 of every
-// 1032-byte packet), purely as a diagnostic - a gap here means a
-// dropped or reordered UDP datagram, not an anomaly in what the SDR
-// app is sending. Never drops a packet over it, just logs. Bench
-// testing (with SDR Console) showed real, harmless reordering of
-// adjacent packets (359,360,361 sent, arriving as 360,359,361) - normal
-// on a network, not something to fix here, but useful to know isn't
-// packet corruption.
-static uint32_t last_ep2_seq = 0;
-static int have_ep2_seq = 0;
 
 // The network's own last-seen MOX bit, tracked independently of in_tx
 // (which cw.c's local key can also change). Needed for a real bug found
@@ -378,15 +368,6 @@ static void handle_command(uint8_t *buf, int len, struct sockaddr_in *sender)
                 // addresses through in the first place.
         {
             if (len != HPSDR_PKT_SIZE) break;
-            uint32_t seq = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
-                           ((uint32_t)buf[6] <<  8) |  (uint32_t)buf[7];
-            if (have_ep2_seq && seq != last_ep2_seq + 1) {
-                printf("hpsdr: EP2 seq gap: expected %u, got %u\n",
-                      last_ep2_seq + 1, seq);
-             }
-            last_ep2_seq = seq;
-            have_ep2_seq = 1;
-
             process_ep2_frame(buf + 8);
             process_ep2_frame(buf + 8 + 512);
 
