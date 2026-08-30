@@ -45,6 +45,9 @@ goes next is [`04_remote_control_and_iq_output.md`](04_remote_control_and_iq_out
   Baseband I/Q (centered at 0 Hz)
      |
      v
+  Anti-alias FIR (antialias.c, 21 taps, applied separately to I and Q)
+     |
+     v
   handed to hpsdr_send_iq() and uac_push_iq() — see 04
 ```
 
@@ -112,8 +115,27 @@ frequency is fixed at `RX_IF_HZ` and does not change when you retune;
 only its *phase* is preserved across calls; see `RX_IF_HZ` in `radio.h`
 for the single place this constant is defined.
 
+**Anti-alias FIR filter.** Right after mixing to I/Q, `sound_process()`
+runs each rail through `antialias_apply()` (`antialias.c`) — a 21-tap,
+symmetric (linear-phase) FIR lowpass, independently on I and independently
+on Q, sharing one coefficient table but each with its own history state
+(`struct antialias_state`). This exists because sampling a real IF signal
+at 96 kHz and synthesizing I/Q from it doesn't automatically guarantee
+zero aliasing right at the ±48 kHz Nyquist edge — see
+[`dsp_design_notes/antialias_filter_design.md`](dsp_design_notes/antialias_filter_design.md)
+for the measured crystal-filter data this was designed against. The
+chosen design (32 kHz passband edge, 47.5 kHz stopband edge) preserves
+essentially all of the usable spectrum the crystal filter itself already
+delivers, adding roughly -81 dB of stopband rejection on top of the
+crystal filter's own real (but more gradual) rolloff — comfortably over
+-100 dB combined right where aliasing would actually occur. It's cheap:
+the symmetric coefficients mean only 11 distinct multiplies per output
+sample rather than 21, and a double-length history buffer avoids any
+wraparound branch in the inner loop.
+
 **Baseband I/Q → the two streaming consumers.** `sound_process()`
-concludes by handing its I/Q arrays off to be streamed out — see
+concludes by handing its (now anti-aliased) I/Q arrays off to be streamed
+out — see
 [`04_remote_control_and_iq_output.md`](04_remote_control_and_iq_output.md)
 for `hpsdr_send_iq()` and `uac_push_iq()`.
 
