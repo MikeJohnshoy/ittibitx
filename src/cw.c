@@ -22,10 +22,49 @@
 
 #define CW_ENVELOPE_LEN 480
 
-// Sidetone/keying pitch - the actual audio-frequency tone injected into
-// the analog exciter (WM8731 DAC -> balanced modulator -> bfo_freq
-// crystal filter). This is what a real CW pitch control would adjust.
+// Sidetone/keying pitch - what the operator actually hears on the local
+// monitor (see cw_get_sample() / SIDETONE_SCALE in sound.c). This is what
+// a real CW pitch control would adjust. It is NOT the frequency written
+// to the DAC's TX-feeding (right) channel - see TX_IF_OFFSET_HZ below and
+// cw_get_tx_sample().
 #define CW_PITCH_HZ 700
+
+// Where the actual TX-modulating tone sits, relative to CW_PITCH_HZ.
+//
+// The crystal filter's passband is fixed by the crystals themselves and
+// doesn't move - measured (docs/dsp_design_notes/antialias_filter_design.md)
+// at ~40.0124 MHz center, ~35kHz wide, with a steep skirt above +17.4kHz
+// (down to -61dB by +28.5kHz). bfo_freq (radio.c, default 40035000) is
+// *not* that center - it's offset ~22.6kHz above it, on purpose: this is
+// the same "BFO at the filter's edge" placement real sbitx's own design
+// article describes (VU2ESE, "The sBitx", section "The local oscillator(s)":
+// clock 1 sits ~25kHz above the filter's passband center for exactly this
+// reason). The RX chain already relies on this same offset without saying
+// so explicitly - antialias_filter_design.md's own analysis assumes it.
+//
+// A single real mixer (this hardware has one, confirmed against the
+// schematic - no I/Q/quadrature stage) always produces both bfo_freq+f
+// and bfo_freq-f from an audio tone at f. With the BFO sitting at the
+// filter's edge instead of its center, only ONE of those two lands inside
+// the passband:
+//   - difference (bfo_freq - f): with f = TX_IF_OFFSET_HZ + CW_PITCH_HZ
+//     (~23.3 kHz), bfo_freq - f lands right at the filter's measured
+//     center - solidly in the passband.
+//   - sum (bfo_freq + f): lands ~28.5kHz above the passband's upper edge,
+//     right where the measured data shows -61dB of rejection.
+//
+// This is why the earlier attempt at "generate the tone 24kHz higher"
+// (see the old comment this replaced, and 03_tx_processing_pipeline.md's
+// "Known limitations") made things worse instead of better: it reused
+// RX_IF_FREQ_HZ (24000, a different constant - the RX-side second-IF
+// target used in radio_tune_to()'s clk2 formula) rather than this filter's
+// actual measured offset from bfo_freq, so it landed on the wrong side of
+// the skirt. 22600 comes from bfo_freq (40035000) minus this radio's
+// measured filter center (40012400) - it's a starting point for a bench
+// check (key down, watch a spectrum/waterfall for the second tone
+// dropping out), not a value guaranteed correct on every board without
+// verifying against that board's own filter.
+#define TX_IF_OFFSET_HZ 22600
 
 // How many cw_poll_key() calls (audio blocks) to hold TX after the key
 // goes up before actually releasing PTT/the relay - standard semi
@@ -89,15 +128,16 @@ static const double cw_envelope[CW_ENVELOPE_LEN] = {
     0.996989, 0.997511, 0.997984, 0.998406, 0.998780, 0.999103, 0.999377, 0.999601, 0.999776,
     0.999900, 0.999975, 1.000000,
 };
-static struct vfo cw_tone;
+static struct vfo cw_tone;        // CW_PITCH_HZ - local sidetone monitor only
+static struct vfo cw_tx_carrier;  // CW_PITCH_HZ + TX_IF_OFFSET_HZ - actual TX drive
 static int envelope_pos = 0;   // 0 = silent, CW_ENVELOPE_LEN-1 = full output
 static int key_down = 0;       // last polled key state
 static int tx_active = 0;      // PTT/relay currently asserted for a keying burst
 static int hang_counter = 0;   // polls remaining before TX releases
 
 void cw_init(void) {
-    // Bare pitch, no IF offset - see the CW_PITCH_HZ comment above.
     vfo_start(&cw_tone, CW_PITCH_HZ, 0);
+    vfo_start(&cw_tx_carrier, CW_PITCH_HZ + TX_IF_OFFSET_HZ, 0);
     envelope_pos = 0;
     key_down = 0;
     tx_active = 0;
@@ -128,6 +168,8 @@ int cw_tx_active(void) {
     return tx_active;
 }
 
+// generate a tone with real cw envelope that we only hear on
+// local audio
 double cw_get_sample(void) {
     if (key_down) {
         if (envelope_pos < CW_ENVELOPE_LEN - 1) envelope_pos++;
@@ -136,6 +178,19 @@ double cw_get_sample(void) {
     }
 
     int tone = vfo_read(&cw_tone);           // Q30 fixed-point sine (vfo.c)
+    double tone_f = (double)tone / 1073741824.0;
+    return tone_f * cw_envelope[envelope_pos];
+}
+
+// The actual TX-modulating waveform - same envelope as cw_get_sample()
+// (advanced there, once per sample; this reads the position, it doesn't
+// advance it again), but at the IF-shifted carrier frequency instead of
+// the bare sidetone pitch. See TX_IF_OFFSET_HZ above for why. Callers
+// must call cw_get_sample() once per sample first (it owns the envelope
+// advance) and this second, for the sample to upconvert, to keep both the sidetone
+// and the TX drive in sync.
+double cw_get_tx_sample(void) {
+    int tone = vfo_read(&cw_tx_carrier);
     double tone_f = (double)tone / 1073741824.0;
     return tone_f * cw_envelope[envelope_pos];
 }
