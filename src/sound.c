@@ -59,6 +59,7 @@
 #define TX_DRIVE           50
 #define TX_SAMPLE_HEADROOM (1000000000.0 / (TX_DRIVE * HW_DEFAULT_TX_SCALE))
 #define TX_SAMPLE_CLAMP    2000000000.0   // stay well inside int32 range
+#define TX_GAIN_CORRECTION 0.045
 // Fixed PCM peak amplitude for the local sidetone monitor (left channel),
 // independent of amp/TX_GAIN_CORRECTION - it used to be amp*SIDETONE_SCALE,
 // which meant every time TX_GAIN_CORRECTION got re-bench-calibrated for RF
@@ -331,9 +332,10 @@ static void *audio_loop(void *arg)
                     if (raw_tx < -TX_SAMPLE_CLAMP) raw_tx = -TX_SAMPLE_CLAMP;
 
                     // L = local sidetone monitor only (on-board speaker),
-                    // at the sidetone pitch, scaled down independently -
-                    // see SIDETONE_SCALE above. Never reaches the PA.
-                    double raw_side = sidetone * amp * SIDETONE_SCALE;
+                    // at the sidetone pitch, at a fixed comfort level - see
+                    // SIDETONE_PEAK_AMPLITUDE above. Never reaches the PA,
+                    // and no longer moves when TX_GAIN_CORRECTION does.
+                    double raw_side = sidetone * SIDETONE_PEAK_AMPLITUDE;
                     if (raw_side > TX_SAMPLE_CLAMP) raw_side = TX_SAMPLE_CLAMP;
                     if (raw_side < -TX_SAMPLE_CLAMP) raw_side = -TX_SAMPLE_CLAMP;
 
