@@ -19,7 +19,17 @@ int cw_tx_active(void);
 
 // Call once per audio sample while cw_tx_active() is true. Returns the
 // next output sample: the sidetone, scaled by the attack/decay envelope
-// as the key goes down/up. Range is approximately [-1, 1].
+// as the key goes down/up. Range is approximately [-1, 1]. Owns the
+// envelope advance - call this before cw_get_tx_sample() for the same
+// sample, not after.
 double cw_get_sample(void);
+
+// Call once per audio sample, immediately after cw_get_sample(), while
+// cw_tx_active() is true. Returns the actual TX-modulating waveform -
+// same envelope position cw_get_sample() just advanced to, but at the
+// IF-shifted carrier (CW_PITCH_HZ + TX_IF_OFFSET_HZ) that lands inside
+// the crystal filter's passband instead of producing two RF tones. See
+// cw.c's TX_IF_OFFSET_HZ comment. Range is approximately [-1, 1].
+double cw_get_tx_sample(void);
 
 #endif /* CW_H */
