@@ -60,6 +60,7 @@
 #define TX_SAMPLE_HEADROOM (1000000000.0 / (TX_DRIVE * HW_DEFAULT_TX_SCALE))
 #define TX_SAMPLE_CLAMP    2000000000.0   // stay well inside int32 range
 #define TX_GAIN_CORRECTION 4.0
+#define SIDETONE_SCALE 0.10  // local speaker audio level
 
 /* ------------------------------------------------------------------ */
 /*  Module state                                                      */
@@ -309,9 +310,12 @@ static void *audio_loop(void *arg)
                     if (raw > TX_SAMPLE_CLAMP) raw = TX_SAMPLE_CLAMP;
                     if (raw < -TX_SAMPLE_CLAMP) raw = -TX_SAMPLE_CLAMP;
                     int32_t v = (int32_t)raw;
-                    play_buf[i * 2]     = v;   // L
-                    play_buf[i * 2 + 1] = v;   // R - WM8731 output is stereo,
-                                               // sidetone is mono, duplicate it
+                    // L = local sidetone monitor only (on-board speaker),
+                    // scaled down independently - see SIDETONE_SCALE above.
+                    // R = the WM8731's PA-feeding channel - keeps the full,
+                    // wattmeter-calibrated TX amplitude, untouched.
+                    play_buf[i * 2]     = (int32_t)(raw * SIDETONE_SCALE);
+                    play_buf[i * 2 + 1] = v;
                 }
             } else {
                 memset(play_buf, 0, (size_t)n * 2 * sizeof(int32_t));
