@@ -59,8 +59,18 @@
 #define TX_DRIVE           50
 #define TX_SAMPLE_HEADROOM (1000000000.0 / (TX_DRIVE * HW_DEFAULT_TX_SCALE))
 #define TX_SAMPLE_CLAMP    2000000000.0   // stay well inside int32 range
-#define TX_GAIN_CORRECTION 4.0
-#define SIDETONE_SCALE 0.005  // local speaker audio level
+// Fixed PCM peak amplitude for the local sidetone monitor (left channel),
+// independent of amp/TX_GAIN_CORRECTION - it used to be amp*SIDETONE_SCALE,
+// which meant every time TX_GAIN_CORRECTION got re-bench-calibrated for RF
+// power reasons (as it just was, 4.0 -> 0.045, moving the CW tone off the
+// crystal filter's skirt and onto its passband - see cw.c's
+// TX_IF_OFFSET_HZ), the sidetone volume silently rode along with it and
+// needed re-tuning too. This is now a comfort setting only: 1e7 matches
+// what SIDETONE_SCALE=0.005 sounded like against the old amp~=2e9
+// (clipped) ceiling (2e9 * 0.005 = 1e7) - the level already confirmed
+// comfortable on the bench - just no longer coupled to whatever TX_DRIVE
+// happens to be calibrated to.
+#define SIDETONE_PEAK_AMPLITUDE 10000000.0
 
 /* ------------------------------------------------------------------ */
 /*  Module state                                                      */
