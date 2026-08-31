@@ -184,12 +184,34 @@ static snd_pcm_t *open_pcm(const char *dev, snd_pcm_stream_t dir)
     return pcm;
 }
 
-/* Recover from an ALSA xrun / suspend. Returns 0 on success. */
+/* Recover from an ALSA xrun / suspend. Returns 0 on success.
+ *
+ * A bare snd_pcm_prepare() is the standard one-shot fix for a fresh
+ * -EPIPE and is usually enough - but on a device that's wedged for a
+ * more persistent reason, prepare() can itself fail (return < 0), and
+ * a caller that doesn't check that (see the playback fix note in
+ * audio_loop() below) ends up calling snd_pcm_writei()/readi() again
+ * immediately, hitting -EPIPE again immediately, calling this again -
+ * an unbounded retry loop that prints "sound: xrun, recovering"
+ * forever at full loop rate and never actually recovers, needing a
+ * manual restart to clear (reported behavior this addresses). Try one
+ * heavier fallback here - snd_pcm_drop() (discard whatever's left in
+ * the ring buffer instead of assuming prepare() already put the device
+ * in a clean state) then prepare() again - before giving up; some ALSA
+ * drivers need that stronger reset to actually clear a stuck xrun.
+ * Both call sites still need to check this function's return value and
+ * stop retrying if it's still negative - fixing this function alone
+ * isn't sufficient if a caller ignores a real failure.
+ */
 static int xrun_recover(snd_pcm_t *pcm, int err)
 {
     if (err == -EPIPE) {                     /* underrun / overrun */
         fprintf(stderr, "sound: xrun, recovering\n");
         err = snd_pcm_prepare(pcm);
+        if (err < 0) {
+            snd_pcm_drop(pcm);
+            err = snd_pcm_prepare(pcm);
+        }
     } else if (err == -ESTRPIPE) {           /* suspended */
         while ((err = snd_pcm_resume(pcm)) == -EAGAIN)
             usleep(10000);
@@ -346,7 +368,31 @@ static void *audio_loop(void *arg)
                 memset(play_buf, 0, (size_t)n * 2 * sizeof(int32_t));
             }
             snd_pcm_sframes_t wframes = snd_pcm_writei(pcm_playback, play_buf, n);
-            if (wframes < 0) xrun_recover(pcm_playback, (int)wframes);
+            if (wframes < 0) {
+                // BUG FIX (reported: "xrun flood, never recovers, have to
+                // restart minibitx"): this used to call xrun_recover() and
+                // throw away its return value, unlike the capture path
+                // just above. If recovery ever genuinely failed here (not
+                // just the ordinary one-shot xrun prepare() usually
+                // clears), nothing noticed - the loop just came back
+                // around, wrote to the still-broken device, got -EPIPE
+                // again, called xrun_recover() again, forever, printing
+                // "sound: xrun, recovering" at the full ~93Hz loop rate
+                // with no backoff and no way out short of a restart.
+                // Capture already breaks the whole thread on a real
+                // failure (see above); do the equivalent here without
+                // killing RX along with it - just stop touching the
+                // playback device (no more sidetone/TX drive) and say so
+                // once, clearly, instead of spinning silently.
+                if (xrun_recover(pcm_playback, (int)wframes) < 0) {
+                    fprintf(stderr,
+                        "sound: playback recovery failed - disabling CW "
+                        "sidetone/TX audio output (restart minibitx to "
+                        "retry)\n");
+                    snd_pcm_close(pcm_playback);
+                    pcm_playback = NULL;
+                }
+            }
         }
     }
 
