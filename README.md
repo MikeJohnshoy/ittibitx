@@ -1,5 +1,10 @@
 # minibitx — an experimental test bed
 
+STATUS: 
+= Network connection using HPSDR Protocol 1 works
+- Receive functions are working
+- currently working on getting CW transmit working
+
 This code configures sbitx hardware for use with external SDR software like Quisk or
 SDRConsole.  minibitx runs on the Raspberry Pi board inside your sbitx in place of
 the `sbitx` software that came with the radio. It has no
