@@ -8,11 +8,17 @@
 #include <unistd.h>     // usleep() - relay-settling time, not GPIO access
 #include <pthread.h>
 
-int freq_hdr = 7020000;  // for test purposes
+int freq_hdr = 7030000;
 int in_tx = 0;
-// actual crystal filter center probably varies across sbitx and zbitx hardware.
-// The default bfo_freq matches that crstal filter center freq and works on my
-// hardware.  Users can set there own value in hw_settings.ini
+
+// bfo_freq is NOT meant to sit at the crystal filter's actual center - it's
+// deliberately offset from it. That's how a single diode-ring mixer (no
+// I/Q hardware on this board - see the schematic) manages CW TX without
+// producing two RF tones: placing the BFO off-center puts the wanted
+// mixer product near the filter's low-loss center while pushing the
+// unwanted one out toward the stopband. The actual crystal filter center 
+// may vary across sbitx/zbitx boards (spec data: ~40.0124 MHz ~22.6kHz 
+// value here.
 int bfo_freq = 40035000;
 struct vfo lo;
 
