@@ -13,6 +13,8 @@
 #include <string.h>
 #include <pthread.h>
 #include <sched.h>
+#include <time.h>
+#include <unistd.h>
 #include <alsa/asoundlib.h>
 
 /* ------------------------------------------------------------------ */
@@ -206,7 +208,6 @@ static snd_pcm_t *open_pcm(const char *dev, snd_pcm_stream_t dir)
 static int xrun_recover(snd_pcm_t *pcm, int err)
 {
     if (err == -EPIPE) {                     /* underrun / overrun */
-        fprintf(stderr, "sound: xrun, recovering\n");
         err = snd_pcm_prepare(pcm);
         if (err < 0) {
             snd_pcm_drop(pcm);
@@ -218,6 +219,71 @@ static int xrun_recover(snd_pcm_t *pcm, int err)
         if (err < 0) err = snd_pcm_prepare(pcm);
     }
     return err;
+}
+
+/* ------------------------------------------------------------------ */
+/*  xrun flood tracking                                                */
+/* ------------------------------------------------------------------ */
+//
+// Reported: "sometimes I get the xrun flood immediately on startup,
+// with no HPSDR consumer connected" - alongside a startup log showing
+// "failed to set audio thread to SCHED_FIFO... falling back to normal
+// scheduling". That's the real cause here, and it's a *different*
+// failure mode than the one xrun_recover()'s drop+prepare fallback and
+// the two call sites' return-value checks were built for. Those guard
+// against the *device* getting stuck (prepare() itself failing) - but
+// on an ordinary SCHED_OTHER thread, snd_pcm_prepare() succeeds fine
+// every single time; the thread just isn't being scheduled promptly
+// enough to feed the next period before it underruns again, so a
+// "successful" recovery is immediately followed by another xrun,
+// forever. Nothing in the existing checks ever fires (recovery keeps
+// "succeeding"), so it prints and spins at the full ~93Hz loop rate
+// indefinitely - which is exactly the flood reported, and a tight loop
+// like that can itself worsen the CPU contention causing it. Rate-limit
+// the logging and add a short breather once a flood is detected, plus
+// a one-time hint pointing at the actual root cause (missing real-time
+// scheduling privilege) instead of scrolling it off screen.
+#define XRUN_FLOOD_WINDOW_NS   1000000000L   /* 1 second */
+#define XRUN_FLOOD_THRESHOLD   10            /* xruns within the window = "flooding" */
+
+struct xrun_tracker {
+    int count;
+    struct timespec window_start;
+    int hint_shown;
+};
+
+static void xrun_note(struct xrun_tracker *t, const char *label)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    long elapsed_ns = (now.tv_sec - t->window_start.tv_sec) * 1000000000L
+                     + (now.tv_nsec - t->window_start.tv_nsec);
+    if (t->count == 0 || elapsed_ns > XRUN_FLOOD_WINDOW_NS || elapsed_ns < 0) {
+        t->window_start = now;
+        t->count = 0;
+    }
+    t->count++;
+
+    if (t->count <= XRUN_FLOOD_THRESHOLD) {
+        fprintf(stderr, "sound: xrun, recovering (%s)\n", label);
+        return;
+    }
+
+    if (!t->hint_shown) {
+        fprintf(stderr,
+            "sound: xrun flood on %s (>%d/sec) - each individual recovery "
+            "is succeeding, so the device isn't stuck; the audio thread "
+            "simply isn't keeping up with real time. If the startup log "
+            "showed \"failed to set audio thread to SCHED_FIFO\", that is "
+            "almost certainly why - grant real-time scheduling, e.g. "
+            "'sudo setcap cap_sys_nice+ep ./minibitx', run as root, or "
+            "raise the rtprio limit for this user via "
+            "/etc/security/limits.d. Backing off and continuing to retry "
+            "rather than spinning at full rate.\n", label, XRUN_FLOOD_THRESHOLD);
+        t->hint_shown = 1;
+    }
+    usleep(20000);   /* breather so this loop isn't itself pegging a core */
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,9 +356,13 @@ static void *audio_loop(void *arg)
     int32_t tx_buf[MAX_FRAMES];
     int32_t play_buf[MAX_FRAMES * CHANNELS];   // CW sidetone -> WM8731 DAC
 
+    static struct xrun_tracker capture_xrun  = {0};
+    static struct xrun_tracker playback_xrun = {0};
+
     while (g_running) {
         snd_pcm_sframes_t frames = snd_pcm_readi(pcm_capture, cap_buf, PERIOD_FRAMES);
         if (frames < 0) {
+            xrun_note(&capture_xrun, "capture");
             if (xrun_recover(pcm_capture, (int)frames) < 0) {
                 fprintf(stderr, "sound: capture recovery failed\n");
                 break;
@@ -384,6 +454,7 @@ static void *audio_loop(void *arg)
                 // killing RX along with it - just stop touching the
                 // playback device (no more sidetone/TX drive) and say so
                 // once, clearly, instead of spinning silently.
+                xrun_note(&playback_xrun, "playback");
                 if (xrun_recover(pcm_playback, (int)wframes) < 0) {
                     fprintf(stderr,
                         "sound: playback recovery failed - disabling CW "
