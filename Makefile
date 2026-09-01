@@ -18,13 +18,7 @@ minibitx: $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 	# Grant real-time scheduling capability so the audio thread can get
 	# SCHED_FIFO (see sound.c's sound_thread_start()) without running
-	# minibitx as root. A fresh binary has none of this - setcap has to
-	# be reapplied after every relink, since it's a filesystem attribute
-	# on this specific binary, not something that carries over. Leading
-	# '-' so a missing/misconfigured sudo (e.g. no libcap2-bin, or a
-	# non-interactive build) prints a warning and moves on instead of
-	# failing the whole build - you'll just see the SCHED_FIFO fallback
-	# warning again at runtime if this line didn't actually take effect.
+	# minibitx as root.
 	-sudo setcap cap_sys_nice+ep $@
 
 clean:
