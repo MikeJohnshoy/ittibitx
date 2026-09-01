@@ -1,9 +1,9 @@
 # RX Anti-Alias FIR Filter: Analysis and Design
 
 Status: implemented (`antialias.c`, wired into `sound_process()` - see
-+§9 and [`../02_rx_processing_pipeline.md`](../02_rx_processing_pipeline.md)).
-+This document describes the crystal filter data and the FIR filter
-+design it justifies, after mixing down to baseband I&Q.
+§9 and [`../02_rx_processing_pipeline.md`](../02_rx_processing_pipeline.md)).
+This document describes the crystal filter data and the FIR filter
+design it justifies, after mixing down to baseband I&Q.
 
 ## 1. Background
 
@@ -46,19 +46,19 @@ dB/octave, versus the upper skirt's 204746.485 dB/octave - roughly 2.8x
 steeper) shows the two skirts are meaningfully asymmetric, with the
 lower skirt rolling off more slowly.
 
-## 3. bfo_freq correction
+## 3. bfo_freq selection
 
 The bfo_freq is selected to to put the crystal filter in the center
-of the IF.  `radio.c` previously set `bfo_freq = 40035000` (40.035 MHz) which seems
-to disagree with the data-sheet value for the 
-center (see above data,  40.0124 MHz - a 22.6kHz discrepancy, larger than the filter's
-own -3dB half-width (~17.4-17.5kHz).  Not having test equipment, I simply experimented with
-different values,  and found that for the filter in my radio 40.035 worked well.
-This value can be tweaked by the end user by setting the bfo_freq value in hw_settings.ini.
-All analysis below assumes this corrected centering (i.e., the crystal filter's response,
-mapped onto the digital 24kHz IF, is now symmetric about 24kHz).
+of the IF.  On transmit if we generated the cw waveform at true baseband (say, at
+700Hz cw pitch) then mixing this up to the crystal filters 40MHz range would provide two closely spaced sum and difference signals in the center of the filters range if we set the bfo_freq to match the crystal filter center freq.  So instead we generate the cw waveform at the higher end of the baseband IF range (we raise it by an amount TX_IF_OFFSET_HZ).  Again, if we had the bfo_freq equal to the crystal filter center freq, our two sum and difference mixer outputs would now be out at each end of the crystal filter.  
 
-## 4. How much does the analog filter already help at Nyquist?
+Placing `bfo_freq` above the filter's true measured center is what shifts the *wanted* CW TX product near
+the filter's low-loss center while pushing the *unwanted* mirror product out into the stopband. 
+
+Practical consequence: `bfo_freq` and `TX_IF_OFFSET_HZ` are coupled, not
+independent. But neither value should change for a given set of hardware.
+
+## 4. How much does the analog filter help at Nyquist?
 
 Mapping the crystal filter's shape directly onto the 24kHz digital IF
 (mixing shifts center frequency, not relative bandwidth), the 96kHz
@@ -79,13 +79,6 @@ beyond it (reaching the measured -61.1dB by 52.5kHz absolute). The
 digital filter does not need to do all the anti-aliasing work itself -
 it only needs to add enough on top of this existing analog rejection to
 reach a comfortable combined margin, right at the edge.
-
-No measured data exists beyond 52.5kHz absolute (+28.5kHz offset), so
-this document does not assume the analog skirt keeps improving linearly
-past that point - real crystal ladder filters typically flatten into an
-ultimate stopband floor rather than improving indefinitely. The -37dB
-figure at exactly Nyquist is the only analog contribution treated as
-reliable here.
 
 ## 5. Filter placement and goal
 
@@ -177,3 +170,8 @@ symmetric, only 11 distinct multiplies are needed per output sample
 (exploit `h[i] == h[20-i]` by summing paired input samples before
 multiplying), not 21.  The code is ready for gcc optimization and should be 
 quite easy on on the raspberry pi processors.
+
+Before inserting this filter into the RX pipeline I could see the recognizable unwanted image
+of - for example - FT8 signal activity on a SDR receiver spectrum display.  It wasn't really
+audible, but adding this filter removed the unwanted image with minimal processing cost.
+
