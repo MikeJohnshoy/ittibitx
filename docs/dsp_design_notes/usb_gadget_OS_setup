@@ -1,0 +1,141 @@
+# USB Gadget (UAC2) OS Setup — Raspberry Pi 4, USB-C Port
+
+Status: setup steps confirmed against Raspberry Pi's own OTG documentation
+(2026-09) for a Pi 4 running Raspberry Pi OS Trixie. Not yet bench-verified
+end-to-end (i.e. an SDR app actually receiving audio over this link) — see
+§6 once that's been tried.
+
+## 1. Background
+
+`usb_gadget.c` (see
+[`04_remote_control_and_iq_output.md`](04_remote_control_and_iq_output.md))
+presents minibitx as a USB Audio Class 2.0 capture device over configfs —
+but only if the underlying OS/kernel already has a USB device-mode
+controller (UDC) bound and ready. On a fresh Raspberry Pi OS install, that
+port comes up in *host* mode by default (or doesn't come up as a gadget
+controller at all), which is exactly what an unmodified boot log shows:
+
+```
+uac: cannot create gadget root /sys/kernel/config/usb_gadget/sbitx_iq: No such file or directory
+init: USB IQ gadget unavailable, continuing without it
+```
+
+`usb_gadget.c` already treats this as non-fatal (minibitx keeps running
+over HPSDR/UDP regardless — see
+[`05_process_and_threading_model.md`](05_process_and_threading_model.md)),
+but the steps below get the UAC2 gadget itself actually working.
+
+This uses the Pi 4's **USB-C port** specifically — the board's four USB-A
+ports are driven by a separate, host-only chip (VL805) and are completely
+unaffected by anything in this document. Keyboard, mouse, flash drives,
+etc. on those ports keep working exactly as before.
+
+## 2. The Pi 4 quirk: peripheral mode has to be forced
+
+The Pi 4's USB-C port genuinely does support USB device/peripheral (OTG)
+mode for data - this isn't a power-only port, contrary to some old forum
+claims. The catch: Pi 4 (and 5) don't have the `OTG_ID` sense line wired
+on that port the way the Pi Zero's micro-USB port does, so the controller
+can't auto-detect which role (host vs. peripheral) to take on its own.
+`dr_mode` has to be set explicitly, or it won't reliably come up as a
+gadget at all.
+
+## 3. Config changes
+
+**`/boot/firmware/config.txt`** (this moved from `/boot/config.txt` a
+couple of Raspberry Pi OS releases back - Trixie keeps it at the
+`firmware` path; check both if `dtoverlay` changes don't seem to take).
+Add:
+
+```
+dtoverlay=dwc2,dr_mode=peripheral
+```
+
+**`/boot/firmware/cmdline.txt`** - this file must stay exactly **one
+line**. Append (space-separated, no newline):
+
+```
+modules-load=dwc2
+```
+
+This gets `dwc2` loaded early enough in boot to register as a UDC before
+anything (like minibitx) needs it.
+
+**`/etc/modules-load.d/minibitx-usb-gadget.conf`** - create this new
+file containing just these two lines:
+
+```
+libcomposite
+snd-aloop
+```
+
+`dwc2` alone isn't enough: `usb_gadget.c` also needs `libcomposite`
+(registers the `/sys/kernel/config/usb_gadget/` configfs subsystem - its
+absence is exactly the "No such file or directory" in the log above) and
+`snd-aloop` (the ALSA loopback pair the UAC2 function's capture side
+reads from).
+
+## 4. Power: the part most people trip over
+
+Once the USB-C port is forced into peripheral mode, it can't simultaneously
+power the Pi - it becomes a pure data link to whatever host it's plugged
+into. **Power the Pi through the GPIO header's 5V/GND pins (or a HAT)
+instead of through USB-C from here on.** This is Raspberry Pi's own
+recommended setup for Pi 4 gadget mode, not a workaround - drawing power
+over the same cable while also using it for data depends on a "low-power
+USB mode" bootloader feature that's reported as unreliable across
+different host systems, so don't rely on it.
+
+## 5. Reboot and verify
+
+Before even launching minibitx:
+
+```
+ls /sys/kernel/config/usb_gadget/     # should exist (even empty) - libcomposite loaded
+ls /sys/class/udc/                    # should show one entry - dwc2 came up as a peripheral UDC
+cat /proc/asound/cards                # should list a "Loopback" card
+```
+
+The first command is expected to print **nothing** on success - an empty
+directory listing means `/sys/kernel/config/usb_gadget/` exists (which is
+the whole check), it's just empty until minibitx creates its `sbitx_iq`
+subtree there. An actual failure looks like `ls: cannot access
+'/sys/kernel/config/usb_gadget/': No such file or directory` instead.
+Don't try to confirm a module loaded by typing its name as a command
+(e.g. typing `libcomposite` at the prompt) - module names aren't
+programs, that'll just get you `command not found`; use `lsmod | grep
+libcomposite` (or `snd-aloop`) if you want to check directly instead of
+relying on the three commands above.
+
+It's normal to see more than one `Loopback` card (e.g. `Loopback` and
+`Loopback_1`) - `snd-aloop` creates several by default.
+`usb_gadget.c`'s `uac_find_loopback_card()` matches the exact id
+`Loopback`, so it always picks the first one and ignores the rest.
+
+If `/sys/class/udc/` is empty, the overlay didn't take (recheck
+`config.txt` and that you edited the `firmware` path) or something else
+claimed the controller.
+
+## 6. Confirming it works end-to-end
+
+Once the above all check out, start minibitx and look for:
+
+```
+init: USB IQ gadget bound to UDC '<name>'
+uac: ALSA loopback PCM opened: hw:N,0,1 @ 48000 Hz, 24-bit, 2 ch
+uac: USB IQ audio stream ready — device name: 'sBitx IQ'
+```
+
+instead of the "gadget unavailable" line from §1. Plug the USB-C cable
+into a host computer and a UAC2 audio-capture device named "sBitx IQ"
+should enumerate there; any app that can record from a standard USB audio
+input (SDR#, HDSDR, GQRX, SDR Console, or a plain audio recorder as a
+first smoke test) should be able to pull the 24-bit/48kHz stereo I/Q
+stream (L = I, R = Q). This step hasn't been run yet as of this writing -
+record the actual result here once tried, including which host OS/app it
+was tested against, since USB gadget audio reliability is known to vary
+by host (the diyAudio RPi4-OTG-audio community thread that informed this
+setup reports Ethernet/serial gadgets working most reliably, with audio
+gadgets needing more care around USB-vs-local clock drift - not expected
+to be a problem for minibitx's one-way capture-only use here, but worth
+confirming by ear/eye on first test).
