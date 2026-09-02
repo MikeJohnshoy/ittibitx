@@ -25,14 +25,30 @@
  *   the host sees a standard USB audio capture device called "sBitx".
  *
  *   Sample delivery:
- *     minibitx's audio thread already produces baseband IQ at 48 kHz (see
- *     sound_process() in sound.c) — no decimation needed here, unlike
- *     sbitx's 96 kHz native rate. uac_push_iq() is called once per sample
- *     directly from sound_process(), the same place that hands the same
- *     block to hpsdr_send_iq() (hpsdr_p1.c) as a separate copy. This runs
- *     independently of whether an HPSDR client is connected — USB audio
- *     and the HPSDR UDP stream are two separate consumers of the same IQ,
- *     and neither module has a dependency on the other.
+ *     Contrary to what this comment used to say - minibitx's audio thread
+ *     does NOT produce baseband IQ at 48kHz; sound.c runs the codec at
+ *     96kHz (SAMPLE_RATE in sound.c), same as sbitx. uac_push_iq() used to
+ *     be called with raw 96kHz-rate samples straight from sound_process(),
+ *     silently double-feeding the (48kHz-configured) gadget/ALSA loopback -
+ *     since the ring buffer between them only drains at the real 48kHz
+ *     rate, roughly half of all samples were being dropped once it filled,
+ *     with no filtering (not a clean decimation, just whichever samples
+ *     lost the race). Fixed: sound_process() now runs I/Q through
+ *     decim48k_apply() (decim48k.c) - a real 96kHz->48kHz decimating
+ *     lowpass, cascaded after antialias_apply() - before calling
+ *     uac_push_iq(), so the 48kHz this gadget advertises is what it
+ *     actually delivers. See
+ *     docs/dsp_design_notes/usb_uac_decimation_design.md for the filter
+ *     design and why a real UAC2 host (the QMX/Tab5 panadapter project,
+ *     tab5.lav.dk, motivated getting this right) makes this worth doing
+ *     properly rather than just relabeling the gadget as 96kHz.
+ *     uac_push_iq() is still called once per (now 48kHz-rate) sample from
+ *     sound_process(), the same place that hands hpsdr_send_iq()
+ *     (hpsdr_p1.c) its own native-96kHz copy - hpsdr_p1.c's rate is
+ *     unaffected by any of this. This runs independently of whether an
+ *     HPSDR client is connected — USB audio and the HPSDR UDP stream are
+ *     two separate consumers of the same IQ, and neither module has a
+ *     dependency on the other.
  *
  *   Producer/consumer split (see usb_gadget.c's uac_writer_thread()
  *   comment for the full incident this fixed): uac_push_iq() only ever
