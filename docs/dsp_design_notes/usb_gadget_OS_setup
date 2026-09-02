@@ -1,9 +1,12 @@
 # USB Gadget (UAC2) OS Setup — Raspberry Pi 4, USB-C Port
 
-Status: setup steps confirmed against Raspberry Pi's own OTG documentation
-(2026-09) for a Pi 4 running Raspberry Pi OS Trixie. Not yet bench-verified
-end-to-end (i.e. an SDR app actually receiving audio over this link) — see
-§6 once that's been tried.
+Status: config.txt/cmdline.txt/modules-load.d steps (§3) bench-confirmed
+on real hardware (2026-09, Pi 4, Raspberry Pi OS Trixie) - UDC, configfs,
+and the Loopback card all came up correctly. The gadget creation itself
+then hit a permission error, fixed in §6 (`cap_dac_override`) - not yet
+re-tested after that fix. Not yet bench-verified end-to-end either (i.e.
+an SDR app actually receiving audio over the link) — see §7 once both of
+those have been tried.
 
 ## 1. Background
 
@@ -116,7 +119,49 @@ If `/sys/class/udc/` is empty, the overlay didn't take (recheck
 `config.txt` and that you edited the `firmware` path) or something else
 claimed the controller.
 
-## 6. Confirming it works end-to-end
+## 6. Permission denied creating the gadget root
+
+Even with everything in §5 checking out (UDC present, `usb_gadget/`
+directory existing, `Loopback` card present), minibitx's own attempt to
+create its gadget still fails the first time, just with a different
+error than before:
+
+```
+uac: cannot create gadget root /sys/kernel/config/usb_gadget/sbitx_iq: Permission denied
+```
+
+This is expected and is not a setup mistake - it's a different problem
+than §1-5 fixed. `/sys/kernel/config/usb_gadget/` is root-owned
+(0755 root:root), and minibitx runs as an ordinary user (`pi`), not
+root - so `mkdir()` under it is refused by normal Unix file permissions,
+same category of problem `sound_thread_start()`'s SCHED_FIFO capability
+already solves for real-time scheduling (see the Makefile).
+
+Fix: grant the binary `cap_dac_override` alongside the `cap_sys_nice` it
+already has - this capability lets a process bypass ordinary
+read/write/execute permission checks, which is exactly what's needed to
+mkdir/write under a root-owned configfs tree without running minibitx as
+root outright:
+
+```
+sudo setcap cap_sys_nice,cap_dac_override+ep ./minibitx
+```
+
+`Makefile` already reapplies this after every rebuild (see its
+`minibitx:` recipe) - if you're building on the Pi and pulled this repo
+after that Makefile change, a plain `make` picks this up automatically
+and no manual `setcap` call is needed. If you're not using the Makefile
+to build, run the `setcap` line above by hand after each rebuild.
+
+This is broader than the narrowest possible fix (a udev rule chowning
+just `/sys/kernel/config/usb_gadget/` to a group `pi` belongs to would
+be more surgical, but is more fragile to get the boot-ordering right
+against `systemd-modules-load.service`) - on a single-purpose radio
+appliance like this, granting the one trusted binary this capability is
+a reasonable trade, consistent with how the SCHED_FIFO capability is
+already handled.
+
+## 7. Confirming it works end-to-end
 
 Once the above all check out, start minibitx and look for:
 
