@@ -1,4 +1,3 @@
-
 CC      := gcc
 # -march=native detects this machine's actual CPU (NEON on the Pi) at
 # build time - minibitx should be built directly on the Pi
@@ -16,10 +15,25 @@ all: minibitx
 
 minibitx: $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
-	# Grant real-time scheduling capability so the audio thread can get
-	# SCHED_FIFO (see sound.c's sound_thread_start()) without running
-	# minibitx as root.
-	-sudo setcap cap_sys_nice+ep $@
+	# Grant two capabilities so minibitx doesn't need to run as root:
+	#  - cap_sys_nice:      lets the audio thread get SCHED_FIFO (see
+	#    sound.c's sound_thread_start()).
+	#  - cap_dac_override:  bypasses the normal file-permission check so
+	#    usb_gadget.c can mkdir/write under the root-owned
+	#    /sys/kernel/config/usb_gadget/ configfs tree (see
+	#    docs/usb_gadget_os_setup.md) - without this, running as an
+	#    ordinary user gets "Permission denied" creating the gadget root
+	#    even though the directory itself exists and dwc2/libcomposite
+	#    are loaded correctly.
+	# A fresh binary has neither capability - setcap has to be reapplied
+	# after every relink, since it's a filesystem attribute on this
+	# specific binary, not something that carries over. Leading '-' so a
+	# missing/misconfigured sudo (e.g. no libcap2-bin, or a
+	# non-interactive build) prints a warning and moves on instead of
+	# failing the whole build - you'll just see the SCHED_FIFO fallback
+	# warning and/or the gadget "Permission denied" again at runtime if
+	# this line didn't actually take effect.
+	-sudo setcap cap_sys_nice,cap_dac_override+ep $@
 
 clean:
 	rm -f $(OBJ) minibitx
