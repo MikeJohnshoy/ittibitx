@@ -1,12 +1,11 @@
 # USB Gadget (UAC2) OS Setup — Raspberry Pi 4, USB-C Port
 
-Status: config.txt/cmdline.txt/modules-load.d (§3) and the
-`cap_dac_override` permission fix (§6) are bench-confirmed on real
-hardware (2026-09, Pi 4, Raspberry Pi OS Trixie) - the gadget binds
-cleanly. That surfaced a real-hardware xrun flood with the gadget idle,
-fixed in `usb_gadget.c` (§7) - not yet re-tested after that fix. Not yet
-bench-verified end-to-end either (i.e. an SDR app actually receiving
-audio over the link) — see §8 once both have been tried.
+Status: §3-§8 are all bench-confirmed on real hardware (2026-09, Pi 4,
+Raspberry Pi OS Trixie) - the gadget binds cleanly (including on repeat
+restarts, not just the first boot) and minibitx starts clean with no
+xrun flood, both with the USB-C cable disconnected and connected. Not
+yet bench-verified end-to-end (i.e. an SDR app actually receiving audio
+over the link) — see §9 once that's been tried.
 
 ## 1. Background
 
@@ -188,10 +187,62 @@ from the audio thread by a lock-free ring buffer (the same architecture
 see that file's own history for the fuller derivation of why a real-time
 producer thread can never be allowed to block on a downstream
 consumer's pace). No OS-level configuration change was needed for this
-one - it was a code fix; rebuild and the flood should be gone even with
-no host attached.
+one - it was a code fix.
 
-## 8. Confirming it works end-to-end
+Confirmed fixed: minibitx now starts clean, no xrun flood, both with the
+USB-C cable disconnected and with it connected to a host.
+
+## 8. UDC still busy on the second start
+
+Bench-confirmed 2026-09: the gadget binds cleanly the *first* time
+minibitx runs after a reboot, but a subsequent start (Ctrl+C and
+re-run, a crash, or a service manager restarting it) fails instead:
+
+```
+uac: cannot bind to UDC 'fe980000.usb': Device or resource busy
+init: USB IQ gadget unavailable, continuing without it
+```
+
+Root cause: `minibitx.c`'s `main()` has no signal handler at all - it's
+just `while (1) sleep(1);` - so the *only* way the process ever ends is
+being killed out from under it. `uac_stop()` (which unbinds the gadget
+from the UDC and tears down the configfs tree) never runs in that case.
+The gadget directory and its UDC binding are configfs/kernel state, not
+process state - they simply persist, still bound to the now-dead
+process's gadget instance. The kernel refuses to write a UDC name into
+an already-bound gadget's `UDC` file (`EBUSY`), even to rebind the exact
+same UDC to what is, from configfs's point of view, a brand new attempt
+- so every restart after the first fails this way, forever, until
+something explicitly unbinds it.
+
+Fixed in `usb_gadget.c`: `uac_gadget_create()` now checks the leftover
+gadget's `UDC` file *before* trying to (re)bind - if it already names a
+controller, that means a previous run left it bound, so it's unbound
+first (`echo "" > .../UDC`, the same step `uac_gadget_destroy()` already
+does on a clean shutdown) before reconfiguring and rebinding. This is
+self-healing regardless of *how* the previous process ended - a clean
+exit, Ctrl+C, a crash, or `SIGKILL` all leave the same on-disk state,
+and this check repairs all of them the same way, rather than depending
+on catching every possible termination signal - which matters because
+`SIGKILL` and a crash genuinely can't be caught, so this backstop is the
+only thing that covers those two cases regardless of anything else.
+
+Separately, `minibitx.c` now also installs a `SIGINT`/`SIGTERM` handler
+(Ctrl+C and a normal `kill`/`systemctl stop`, respectively - not
+`SIGKILL`) that runs an actual graceful shutdown - `sound_thread_stop()`,
+`uac_stop()`, `hpsdr_stop()`, `hamlib_stop()`, and parking PTT/the T/R
+relay low via `radio_set_tx(0)` - instead of the previous behavior of
+just dying on the spot. That's a genuine improvement on top of the
+self-healing fix above (a normal Ctrl+C exit now unbinds the gadget and
+closes its ALSA handle itself, rather than relying on the *next* start
+to clean up after it), but the self-healing check above is still what's
+actually load-bearing for `SIGKILL`/crash recovery, since nothing in
+userspace runs in either of those cases.
+
+Confirmed fixed: minibitx now binds the gadget successfully on repeated
+restarts, not just the first one after a reboot.
+
+## 9. Confirming it works end-to-end
 
 Once the above all check out, start minibitx and look for:
 
