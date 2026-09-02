@@ -143,7 +143,9 @@ static int uac_find_udc(char *buf, size_t len) {
  * --------------------------------------------------------------------- */
 
 // Create and configure the UAC2 gadget under configfs.
-// Idempotent: if the gadget already exists (leftover from a crash), this
+// Idempotent: if the gadget already exists (leftover from a previous run
+// that didn't shut down cleanly - Ctrl+C, systemd restarting us, a crash,
+// or SIGKILL - none of which reach uac_stop()/uac_gadget_destroy()), this
 // function detects the existing tree and skips redundant mkdir/write calls.
 // Returns 0 on success, -1 on any configfs error.
 static int uac_gadget_create(void) {
@@ -154,6 +156,37 @@ static int uac_gadget_create(void) {
         fprintf(stderr, "uac: cannot create gadget root %s: %s\n",
                 UAC_GADGET_ROOT, strerror(errno));
         return -1;
+    }
+
+    // If this gadget is left over from a previous run, it may still be
+    // BOUND to a UDC from back then - "leftover but idle" isn't actually
+    // possible here, since binding to a UDC is the very last step below,
+    // so any leftover tree that exists at all is either fully unbound or
+    // still bound exactly as the previous process left it. The kernel
+    // refuses to write a UDC name into an already-bound gadget's UDC file
+    // (EBUSY), even to rebind the same name - so without this check, the
+    // bind attempt near the end of this function fails every time except
+    // the very first boot (bench-confirmed: "uac: cannot bind to UDC
+    // '<name>': Device or resource busy" on every minibitx restart after
+    // the first, since nothing in this process's normal shutdown paths -
+    // there mostly aren't any; see minibitx.c's main() - ever unbinds it).
+    // Unbind first if so; safe/idempotent even when nothing was actually
+    // bound (writing "" to an already-empty UDC file is a no-op).
+    snprintf(path, sizeof(path), "%s/UDC", UAC_GADGET_ROOT);
+    {
+        FILE *udc_check = fopen(path, "r");
+        if (udc_check) {
+            char cur[256] = {0};
+            if (fgets(cur, sizeof(cur), udc_check))
+                cur[strcspn(cur, "\n")] = '\0';
+            fclose(udc_check);
+            if (cur[0] != '\0') {
+                printf("uac: gadget still bound to '%s' from a previous run - unbinding first\n", cur);
+                uac_write_attr(path, "");
+            }
+        }
+        // ENOENT here just means no leftover tree at all (first boot,
+        // or a prior clean uac_gadget_destroy()) - nothing to unbind.
     }
 
     // USB IDs: use the HermesLite vendor/product pair to stay compatible with
