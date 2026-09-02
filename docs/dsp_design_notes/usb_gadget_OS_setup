@@ -1,12 +1,12 @@
 # USB Gadget (UAC2) OS Setup — Raspberry Pi 4, USB-C Port
 
-Status: config.txt/cmdline.txt/modules-load.d steps (§3) bench-confirmed
-on real hardware (2026-09, Pi 4, Raspberry Pi OS Trixie) - UDC, configfs,
-and the Loopback card all came up correctly. The gadget creation itself
-then hit a permission error, fixed in §6 (`cap_dac_override`) - not yet
-re-tested after that fix. Not yet bench-verified end-to-end either (i.e.
-an SDR app actually receiving audio over the link) — see §7 once both of
-those have been tried.
+Status: config.txt/cmdline.txt/modules-load.d (§3) and the
+`cap_dac_override` permission fix (§6) are bench-confirmed on real
+hardware (2026-09, Pi 4, Raspberry Pi OS Trixie) - the gadget binds
+cleanly. That surfaced a real-hardware xrun flood with the gadget idle,
+fixed in `usb_gadget.c` (§7) - not yet re-tested after that fix. Not yet
+bench-verified end-to-end either (i.e. an SDR app actually receiving
+audio over the link) — see §8 once both have been tried.
 
 ## 1. Background
 
@@ -161,7 +161,37 @@ appliance like this, granting the one trusted binary this capability is
 a reasonable trade, consistent with how the SCHED_FIFO capability is
 already handled.
 
-## 7. Confirming it works end-to-end
+## 7. Real-hardware xrun flood with the gadget enabled but idle
+
+Bench-confirmed 2026-09: once §6's permission fix lets the gadget bind
+successfully, starting minibitx with **no USB host actually draining
+"sBitx IQ" yet** (not plugged into a host, or plugged in but no app has
+opened it for capture) reproduces sound.c's real hardware xrun flood on
+hw:0,0 - the same symptom the earlier SCHED_FIFO/priority work fixed,
+but from a completely different, new cause. Confirm this isn't the old
+problem recurring by checking the startup log doesn't show the "failed
+to set audio thread to SCHED_FIFO" warning - if it's absent (real-time
+scheduling is working), this section's fix is the relevant one instead.
+
+Root cause: the previous `usb_gadget.c` wrote to the ALSA loopback PCM
+synchronously, inline, from `uac_push_iq()` - which runs on sound.c's
+real-time audio thread. If nothing reads the other side of that
+loopback pair, its ring buffer fills within a few blocks and every
+subsequent write there fails, triggering a recovery attempt - real
+kernel work, paid for on the *radio's own* real-time audio thread, every
+~10.7ms, forever. That's enough added latency for the audio thread to
+miss its own hw:0,0 deadlines - i.e. an idle, unrelated USB link could
+starve the actual radio hardware. This is fixed in `usb_gadget.c`: the
+ALSA write moved to its own dedicated `uac_writer_thread()`, decoupled
+from the audio thread by a lock-free ring buffer (the same architecture
+`hpsdr_p1.c`'s IQ pacer thread already uses, and for the same reason -
+see that file's own history for the fuller derivation of why a real-time
+producer thread can never be allowed to block on a downstream
+consumer's pace). No OS-level configuration change was needed for this
+one - it was a code fix; rebuild and the flood should be gone even with
+no host attached.
+
+## 8. Confirming it works end-to-end
 
 Once the above all check out, start minibitx and look for:
 
@@ -171,7 +201,8 @@ uac: ALSA loopback PCM opened: hw:N,0,1 @ 48000 Hz, 24-bit, 2 ch
 uac: USB IQ audio stream ready — device name: 'sBitx IQ'
 ```
 
-instead of the "gadget unavailable" line from §1. Plug the USB-C cable
+instead of the "gadget unavailable" line from §1, and no xrun flood on
+hw:0,0 either with or without a host attached (§7). Plug the USB-C cable
 into a host computer and a UAC2 audio-capture device named "sBitx IQ"
 should enumerate there; any app that can record from a standard USB audio
 input (SDR#, HDSDR, GQRX, SDR Console, or a plain audio recorder as a
