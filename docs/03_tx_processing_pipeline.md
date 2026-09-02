@@ -2,8 +2,9 @@
 
 Status: CW TX implemented and bench-verified, including single-sideband
 image suppression (~40dB, confirmed on-air on two independent SDR
-displays — see "Known limitations" below). This document covers
-the signal chain the same way
+displays) and dial-accurate TX frequency (confirmed on-air against an
+independent remote receiver — see "Known limitations" below for both).
+This document covers the signal chain the same way
 [`02_rx_processing_pipeline.md`](02_rx_processing_pipeline.md) covers
 receive.
 
@@ -251,8 +252,8 @@ never anything hardware-facing:
   balance and any minor path nonlinearity contribute. Nothing here
   suggests it's fixable further without new measurement data specific
   to this board's actual filter.
-- **TX frequency offset from the dial — corrected in code, not yet
-  bench-verified on air.** Real sbitx computes a
+- **TX frequency offset from the dial — fixed, bench-verified on air.**
+  Real sbitx computes a
   *different* LO frequency for TX in CW mode than for RX — it applies
   an additional ∓`rx_pitch` (700 Hz) correction specifically so the
   transmitted carrier lands exactly on the dial frequency, compensating
@@ -270,12 +271,9 @@ never anything hardware-facing:
   `radio.c`), the mirror of real sbitx's own `rx_pitch` correction,
   applied at the one place all TX funnels through rather than inside
   `radio_tune_to()` (which must stay TX-agnostic, since it also drives
-  the RX baseband NCO). Derived from, and consistent with, the already
-  bench-confirmed dial − 700 Hz behavior, but the corrected code itself
-  hasn't yet been checked against a second receiver — do that (key down
-  at a known dial frequency, confirm an independent receiver shows the
-  signal exactly on that frequency rather than 700 Hz low) before
-  trusting it fully, and re-verify after any change to `bfo_freq`,
-  `TX_IF_OFFSET_HZ`, or `RX_IF_FREQ_HZ`, since the correction's value
-  (`CW_PITCH_HZ`) was derived from today's specific combination of those
-  three constants.
+  the RX baseband NCO). Confirmed on the air with an independent remote
+  receiver: keyed down at a known dial frequency (`freq_hdr`), and the
+  transmitted signal now lands exactly on it — no residual 700 Hz
+  offset. Re-verify after any change to `bfo_freq`, `TX_IF_OFFSET_HZ`,
+  or `RX_IF_FREQ_HZ`, since the correction's value (`CW_PITCH_HZ`) was
+  derived from today's specific combination of those three constants.
