@@ -6,6 +6,7 @@
 #include "hpsdr_p1.h"
 #include "usb_gadget.h"
 #include "antialias.h"
+#include "decim48k.h"
 #include "cw.h"
 #include "hw_settings.h"
 #include <stdio.h>
@@ -299,6 +300,12 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
     // ~10.7ms block, not a fresh signal).
     static struct antialias_state aa_i;
     static struct antialias_state aa_q;
+    // 96kHz->48kHz decimation for usb_gadget.c's UAC2 gadget only (see
+    // docs/dsp_design_notes/usb_uac_decimation_design.md) - independent
+    // history/phase per rail, same as aa_i/aa_q above. hpsdr_p1.c keeps
+    // getting native 96kHz IQ unchanged; only the USB path is decimated.
+    static struct decim48k_state dec_i;
+    static struct decim48k_state dec_q;
 
     (void)input_mic;
     if (n_samples > 4096) n_samples = 4096;
@@ -334,8 +341,21 @@ static void sound_process(int32_t *input_rx, int32_t *input_mic, int32_t *output
     // (network) and usb_gadget.c (USB Audio Class gadget) don't know about
     // each other, and either can be active without the other
     hpsdr_send_iq(i_samples, q_samples, n_samples);
-    for (int n = 0; n < n_samples; n++)
-        uac_push_iq(i_samples[n], q_samples[n]);
+
+    // usb_gadget.c's UAC2 gadget is fixed at 48kHz (matches real UAC2
+    // hosts like the QMX/Tab5 panadapter this was built to interoperate
+    // with - see docs/dsp_design_notes/usb_uac_decimation_design.md),
+    // but this block's i_samples[]/q_samples[] are still native 96kHz -
+    // decim48k_apply() only emits a kept sample on every other call, so
+    // uac_push_iq() is only called when both rails have one ready
+    // (they always agree, since both are fed in lockstep every n here).
+    for (int n = 0; n < n_samples; n++) {
+        double out_i, out_q;
+        int have_i = decim48k_apply(&dec_i, i_samples[n], &out_i);
+        int have_q = decim48k_apply(&dec_q, q_samples[n], &out_q);
+        if (have_i && have_q)
+            uac_push_iq(out_i, out_q);
+    }
 
     // keep local outputs silent
     memset(output_speaker, 0, n_samples * sizeof(int32_t));
