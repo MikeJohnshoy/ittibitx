@@ -8,13 +8,10 @@ the signal chain the same way
 receive.
 
 Note: [`dsp_design_notes/tx_power_calibration.md`](dsp_design_notes/tx_power_calibration.md)
-still describes an *earlier* calibration session (`TX_GAIN_CORRECTION =
-4.0`) and its "every band clips to the same ceiling" finding. That
-finding no longer holds — `TX_GAIN_CORRECTION` is now 0.045 (see
-"Adjusting power levels" below), a ~89x reduction, and bands are no
-longer saturating against `TX_SAMPLE_CLAMP`. That doc hasn't been
-re-run against the current pipeline yet; treat its specific numbers as
-historical until it is.
+has been updated for the current pipeline (`TX_GAIN_CORRECTION` = 0.045,
+one QRP CW test frequency per band) — its worksheet is filled in for 40m
+only; the other eight bands' `scale` values still need a bench session
+with a wattmeter to bisect.
 
 minibitx transmits CW only — a straight key wired into GPIO (see
 [`01_hardware_init_and_control.md`](01_hardware_init_and_control.md)),
@@ -41,13 +38,14 @@ for RX — same hardware, signal flowing the opposite direction:
      |           balanced modulator: ~23.3kHz carrier mixed onto bfo_freq -
      |           BFO sits at the filter's edge, not its center, so only
      |           the difference product lands in the passband (see below)
-     |           and the sum product lands outside and gets suppressed.
      v
   Crystal filter, fixed at ~bfo_freq  (same filter RX uses)
      |
      v
-  Mixer 1  <---  clk2, si5351 RX/TX LO (radio_tune_to(), same as RX)
-     |           radio.c: si5351bx_setfreq(2, f + bfo_freq - RX_IF_FREQ_HZ)
+  Mixer 1  <---  clk2, si5351 RX/TX LO (radio_tune_to(), same clock as RX,
+     |           frequency corrected by +CW_PITCH_HZ for the duration of TX)
+     |           radio.c: si5351bx_setfreq(2, f + bfo_freq - RX_IF_FREQ_HZ
+     |                                        + CW_PITCH_HZ)  [TX only]
      v
   PA  (gain fixed by hardware; drive level set upstream - see below)
      |
@@ -117,7 +115,7 @@ the BFO off-center like this, the *difference* product lands right at
 the filter's real center (deep in the passband) while the *sum* product
 lands far into the stopband — see "Crystal filter" below. Before this,
 `cw.c` fed a bare 700 Hz tone straight into this same mixer, so both
-products (`bfo_freq` ± 700 Hz) landed within ~1-2 kHz of each other, far
+products (`bfo_freq` ± 700 Hz) landed within ~5-6 kHz of each other, far
 too close together for this filter to tell apart — see "Known
 limitations" for how that showed up on the air.
 
@@ -137,15 +135,22 @@ coincidentally, why the *old* 700Hz-straight-to-the-mixer scheme didn't
 work: both of its products landed only ~5-6 kHz from `bfo_freq`, nowhere
 near this filter's edge, so neither one got meaningfully rejected.
 
-**Mixer 1 — the RX/TX LO (clk2), same clock and same `radio_tune_to()`
-call RX uses.** This is the only stage that differs by *frequency*
-between RX and TX, and it doesn't actually differ in code — `f + bfo_freq -
-RX_IF_FREQ_HZ` is computed identically for RX and TX, because
-`radio_tune_to()` doesn't distinguish them. For our example: `clk2 =
-7,020,000 + 40,035,000 - 24,000 = 47,031,000 Hz`. Mixing the crystal
-filter's output back down against this LO is what actually determines
-the transmitted RF frequency — see "Known limitations" for the gap
-this reuse creates.
+**Mixer 1 — the RX/TX LO (clk2), same clock `radio_tune_to()` sets for
+RX, corrected while transmitting.** `radio_tune_to()` itself still
+computes `f + bfo_freq - RX_IF_FREQ_HZ` identically for RX and TX — it
+has no notion of TX at all, and must not: it's also what drives the RX
+baseband NCO (`vfo_start(&lo, RX_IF_FREQ_HZ, ...)`), which has no pitch
+offset to correct for in the first place (see "Known limitations"). The
+correction lives one level up, in `radio.c`'s `radio_tx_apply()` — the
+single place all TX (straight key via `cw.c`, and remote MOX via
+`hpsdr_p1.c`) actually engages hardware — which re-issues clk2 with an
+extra `+ CW_PITCH_HZ` right before asserting PTT, and restores the plain
+formula right after dropping the relay. For our example: RX/idle clk2 =
+`7,020,000 + 40,035,000 - 24,000 = 47,031,000 Hz`; while keyed, clk2 =
+`47,031,700 Hz`. Mixing the crystal filter's output back down against
+this (now TX-corrected) LO is what actually determines the transmitted
+RF frequency — see "Known limitations" for the gap this closes and why
+it was needed.
 
 **PA.** A fixed-gain analog power amplifier stage. minibitx has no
 digital gain control over the PA itself — `radio_set_tx()`
@@ -232,7 +237,7 @@ never anything hardware-facing:
 
 - **Image suppressed, not eliminated (~40dB).** The `TX_IF_OFFSET_HZ`
   placement (see "Mixer 2" above) fixed what used to be a genuine DSB
-  problem in minibitx (two equal-strength tones 1.4 kHz apart) — confirmed on-air,
+  problem (two equal-strength tones 1.4 kHz apart) — confirmed on-air,
   on two independent SDR displays, at roughly 40dB of suppression
   between the wanted and unwanted product. That's real, usable
   single(-ish)-sideband CW, comparable to what many communications-grade
@@ -246,13 +251,31 @@ never anything hardware-facing:
   balance and any minor path nonlinearity contribute. Nothing here
   suggests it's fixable further without new measurement data specific
   to this board's actual filter.
-- **TX frequency offset from the dial.** Real sbitx computes a
+- **TX frequency offset from the dial — corrected in code, not yet
+  bench-verified on air.** Real sbitx computes a
   *different* LO frequency for TX in CW mode than for RX — it applies
   an additional ∓`rx_pitch` (700 Hz) correction specifically so the
   transmitted carrier lands exactly on the dial frequency, compensating
-  for the operator's audio tone being offset by that same pitch.
-  `radio_tune_to()` here uses one flat formula for both RX and TX with
-  no such correction, so the actual transmitted frequency runs off the
-  intended dial frequency by an amount tied to `RX_IF_FREQ_HZ` and the
-  CW pitch. This is a real, known gap — flagged during TX debugging,
-  not yet fixed, and not addressed by anything in this document.
+  for its own onboard RX demodulator's pitch convention. minibitx's
+  version of this gap has a different root cause: minibitx has no
+  onboard RX demod at all (that's the external SDR app's job, per this
+  document's opening paragraph), so the baseband I/Q it delivers over
+  HPSDR/USB carries no pitch offset of its own — `radio_tune_to()`'s
+  formula puts RX exactly on the dial. TX was the one side that was
+  off, by `CW_PITCH_HZ` (700 Hz) low, because `cw.c`'s TX carrier sits
+  at `CW_PITCH_HZ + TX_IF_OFFSET_HZ` rather than at `RX_IF_FREQ_HZ` (see
+  "Mixer 1" above for the derivation) — bench-confirmed on the air as
+  transmitting at dial − 700 Hz. Fixed by correcting clk2 by
+  `+ CW_PITCH_HZ` for the duration of TX only (`radio_tx_apply()` in
+  `radio.c`), the mirror of real sbitx's own `rx_pitch` correction,
+  applied at the one place all TX funnels through rather than inside
+  `radio_tune_to()` (which must stay TX-agnostic, since it also drives
+  the RX baseband NCO). Derived from, and consistent with, the already
+  bench-confirmed dial − 700 Hz behavior, but the corrected code itself
+  hasn't yet been checked against a second receiver — do that (key down
+  at a known dial frequency, confirm an independent receiver shows the
+  signal exactly on that frequency rather than 700 Hz low) before
+  trusting it fully, and re-verify after any change to `bfo_freq`,
+  `TX_IF_OFFSET_HZ`, or `RX_IF_FREQ_HZ`, since the correction's value
+  (`CW_PITCH_HZ`) was derived from today's specific combination of those
+  three constants.
