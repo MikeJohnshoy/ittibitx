@@ -45,7 +45,7 @@ client at this Pi's IP, and (optionally) its CAT/rig control at
 The `docs/` folder has the detailed breakdown of how minibitx works,
 organized roughly from the hardware up:
 
-| Doc | Coontent |
+| Doc | Content |
 |---|---|
 | [`docs/00_intro.md`](docs/00_intro.md) | Project scope, status, and a map of the rest of the docs |
 | [`docs/01_hardware_init_and_control.md`](docs/01_hardware_init_and_control.md) | GPIO, si5351/I2C, WM8731 codec bring-up |
@@ -53,7 +53,7 @@ organized roughly from the hardware up:
 | [`docs/03_tx_processing_pipeline.md`](docs/03_tx_processing_pipeline.md) | What TX support exists today and what's still missing |
 | [`docs/04_remote_control_and_iq_output.md`](docs/04_remote_control_and_iq_output.md) | rigctld, HPSDR control/IQ, USB Audio Class output |
 | [`docs/05_process_and_threading_model.md`](docs/05_process_and_threading_model.md) | Startup sequence and thread structure |
-| [`docs/dsp_design_notes/`](docs/dsp_design_notes/) | Proposed-but-not-yet-implemented DSP work (e.g. the anti-alias FIR) |
+| [`docs/dsp_design_notes/`](docs/dsp_design_notes/) | DSP work (e.g. the anti-alias FIR) and other design docs |
 | [`docs/07_build_and_deployment.md`](docs/07_build_and_deployment.md) | Build, kernel/overlay dependencies, deployment notes |
 | [`docs/08_troubleshooting_and_bringup.md`](docs/08_troubleshooting_and_bringup.md) | Hardware bring-up gotchas |
 | [`docs/10_external_digital_modes_wsjtx.md`](docs/10_external_digital_modes_wsjtx.md) | Using minibitx with WSJT-X and similar digital-mode apps |
