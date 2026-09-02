@@ -17,9 +17,29 @@
 #include "cw.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <signal.h>
 
 // Standard rigctld TCP port
 #define HAMLIB_PORT 4532
+
+// Graceful shutdown: Ctrl+C (SIGINT) or a service manager's SIGTERM used to
+// take the default action - the process died on the spot, skipping every
+// _stop() function below entirely. That's exactly what left the USB
+// gadget's configfs tree bound to a dead process on the next start (see
+// docs/usb_gadget_os_setup.md §8 - fixed there too, independently, as a
+// self-healing backstop against this same state arising from a crash or
+// SIGKILL, which can't be caught here), and could in principle leave
+// PTT/the T/R relay stuck asserted if Ctrl+C landed while the key was
+// down. The handler only sets a flag - it must stay async-signal-safe,
+// so no printf/pthread/ALSA calls here - and the idle loop below (running
+// on the normal main-thread stack, not signal context) does the actual
+// teardown once it notices.
+static volatile sig_atomic_t shutdown_requested = 0;
+
+static void handle_shutdown_signal(int sig) {
+  (void)sig;
+  shutdown_requested = 1;
+}
 
 // Every hardware/subsystem init step below reports its own result with a
 // consistent "init: ..." line (see docs/01_hardware_init_and_control.md),
@@ -30,6 +50,18 @@ int main(int argc, char **argv) {
   (void)argv;
 
   printf("Starting miniBitx IQ Streamer and control interface...\n");
+
+  // Installed first, before anything below can fail/return early - every
+  // _stop() function called from the shutdown sequence already guards on
+  // its own "did this subsystem actually come up" state (e.g. sound.c's
+  // g_running, hpsdr_p1.c's hpsdr_sock >= 0), so it's safe to reach the
+  // idle loop and shut down cleanly even if some earlier init step above
+  // was skipped or failed.
+  struct sigaction sa = {0};
+  sa.sa_handler = handle_shutdown_signal;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGINT, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
 
   // Board-specific calibration (currently just bfo_freq) lives in
   // data/hw_settings.ini, not in source - the crystal filter center
@@ -127,12 +159,37 @@ int main(int argc, char **argv) {
   status_print();
   if (isatty(fileno(stdout))) putchar('\n');
 
-  // minibitx dle loop: keep the program alive. Operational state changes (tuning,
-  // PTT) are reported as they're processed by hamlib.c/hpsdr_p1.c, not
-  // polled here.
-  while (1) {
+  // minibitx idle loop: keep the program alive until asked to shut down.
+  // Operational state changes (tuning, PTT) are reported as they're
+  // processed by hamlib.c/hpsdr_p1.c, not polled here. sleep(1) returns
+  // early the moment SIGINT/SIGTERM arrives, so shutdown starts
+  // immediately rather than waiting out the rest of that second.
+  while (!shutdown_requested) {
     sleep(1);
   }
 
+  // Graceful shutdown - roughly the reverse of bring-up, so each step
+  // tears down into a quiescent system rather than racing something
+  // still running above it.
+  printf("\nminibitx: shutting down...\n");
+
+  // Park PTT/the T/R relay low in case the key happened to be down at
+  // the moment of the signal. radio_set_tx() only hands the change to
+  // its own worker thread (see radio.c) rather than applying it
+  // synchronously, so give that thread a moment to actually run before
+  // this process exits out from under it - 50ms comfortably covers its
+  // ~25ms worst-case PTT/relay-settling sequence.
+  radio_set_tx(0);
+  usleep(50000);
+
+  // Stop producing audio/IQ before tearing down anything that consumes
+  // it, so uac_stop()/hpsdr_stop() below see a stream that's already
+  // quiet rather than racing sound.c's real-time thread mid-teardown.
+  sound_thread_stop();
+  uac_stop();
+  hpsdr_stop();
+  hamlib_stop();
+
+  printf("minibitx: shutdown complete.\n");
   return 0;
 }
