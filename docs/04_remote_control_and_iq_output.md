@@ -75,11 +75,23 @@ on `usb_gadget.c` — each holds its own independent copy of the I/Q.
 
 `usb_gadget.c` presents the radio as a standard USB Audio Class 2.0
 capture device, if the hardware/kernel support it (needs a USB
-device-mode controller and `snd-aloop`). It's fed its own I/Q copy
+device-mode controller and `snd-aloop`) - see
+[`usb_gadget_os_setup.md`](usb_gadget_os_setup.md) for the Raspberry Pi 4
+config.txt/cmdline.txt changes and GPIO-power caveat this requires; it is
+not on by default on a stock Raspberry Pi OS install. It's fed its own I/Q copy
 directly from `sound.c`, with no ALSA/gadget dependency on
 `hpsdr_p1.c`. Ported near-verbatim from the UAC2 section of sbitx's
 `hpsdr_p1.c`, since that code had no sBitx/GTK dependency of its own —
 only ALSA and Linux configfs/sysfs — making the port mechanical.
+
+The gadget advertises 48kHz, but `sound.c` runs natively at 96kHz -
+`sound_process()` runs I/Q through a real decimating lowpass
+(`decim48k.c`) before handing it to `uac_push_iq()`, so what the gadget
+delivers actually matches what it advertises. See
+[`dsp_design_notes/usb_uac_decimation_design.md`](dsp_design_notes/usb_uac_decimation_design.md)
+for the filter design and the real UAC2 host (a panadapter project) that
+motivated getting this right. `hpsdr_p1.c` is unaffected - it still gets
+native 96kHz I/Q.
 
 Either stream works without the other: a client connected over USB audio
 alone, with no HPSDR app connected, still gets I/Q, and vice versa.
