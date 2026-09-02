@@ -18,6 +18,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <time.h>
 
 /* ---------------------------------------------------------------------
  * Compile-time configuration
@@ -39,14 +42,34 @@
 // Internal ring: hold up to UAC_PERIOD_FRAMES samples before each ALSA write
 #define UAC_BUF_FRAMES      UAC_PERIOD_FRAMES
 static uint8_t  uac_pcm_buf[UAC_BUF_FRAMES * UAC_FRAME_BYTES];
-static int      uac_buf_pos  = 0;   // next frame slot to fill (in frames)
+
+/* ---------------------------------------------------------------------
+ * IQ handoff queue - see the "producer/consumer split" note above
+ * uac_push_iq() below. Same lock-free SPSC ring design as hpsdr_p1.c's
+ * IQ queue (that file's comments have the full derivation of why a
+ * plain mutex isn't safe to share with a real-time producer thread) -
+ * producer (uac_push_iq(), called from sound.c's SCHED_FIFO audio
+ * thread) only ever writes uac_q_head; consumer (uac_writer_thread())
+ * only ever writes uac_q_tail. Neither ever blocks on the other.
+ * --------------------------------------------------------------------- */
+#define UAC_QUEUE_CAP   8192               // power of two; ~170ms at 48kHz -
+                                            // generous slack against USB-side stalls
+#define UAC_QUEUE_MASK  (UAC_QUEUE_CAP - 1)
+
+static double       uac_q_i[UAC_QUEUE_CAP];
+static double       uac_q_q[UAC_QUEUE_CAP];
+static atomic_uint  uac_q_head = 0;
+static atomic_uint  uac_q_tail = 0;
 
 /* ---------------------------------------------------------------------
  * Module-level state
  * --------------------------------------------------------------------- */
-static snd_pcm_t   *uac_pcm_handle = NULL;  // ALSA PCM write handle
+static snd_pcm_t   *uac_pcm_handle = NULL;  // ALSA PCM write handle - owned
+                                             // by uac_writer_thread() only
 static int          uac_gadget_up  = 0;     // 1 after configfs gadget is created
 static volatile int uac_active     = 0;     // 1 while host is streaming
+static pthread_t    uac_writer_tid;
+static volatile int uac_writer_running = 0; // 1 while uac_writer_thread() should keep looping
 
 /* ---------------------------------------------------------------------
  * Internal helpers
@@ -303,6 +326,104 @@ static int uac_alsa_open(void) {
 }
 
 /* ---------------------------------------------------------------------
+ * Writer thread — owns uac_pcm_handle exclusively; the only thing that
+ * ever calls snd_pcm_writei() on it.
+ *
+ * BUG FIX (reported: enabling the USB gadget alone, with no host
+ * actually draining "sBitx IQ" yet, reintroduced sound.c's real
+ * hardware xrun flood on hw:0,0 - the exact failure mode already fixed
+ * once this project for hpsdr_p1.c, just in a different file). The
+ * previous version of this file did the ALSA loopback write inline,
+ * synchronously, from uac_push_iq() - which is called from
+ * sound_process(), on sound.c's SCHED_FIFO real-time audio thread. If
+ * nothing is reading the *other* side of the snd-aloop pair (no host
+ * plugged in, or plugged in but no app has opened "sBitx IQ" for
+ * capture yet), that loopback's ring buffer fills within a few blocks
+ * and every subsequent snd_pcm_writei() call here returns -EPIPE,
+ * triggering an snd_pcm_prepare()+retry - real kernel/ioctl work,
+ * paid for on the audio thread, every ~10.7ms, forever, silently (this
+ * function printed nothing on -EPIPE). That's enough added latency per
+ * iteration for the audio thread to miss hw:0,0's own real capture/
+ * playback deadlines - i.e. a completely unrelated, absent-or-idle USB
+ * host can starve the actual radio hardware. Same lesson as
+ * hpsdr_p1.c's pacer-thread rewrite: a real-time producer thread must
+ * never be able to block (or spend unbounded time) on a downstream
+ * consumer's pace. Fix: uac_push_iq() (still called from the audio
+ * thread) now only ever touches the lock-free queue above - it can't
+ * block, and drops samples silently on overflow instead. This thread
+ * is the sole consumer: it waits for a full period's worth of samples,
+ * packs and writes them to the loopback PCM exactly as before, and if
+ * that blocks or errors, only USB audio quality suffers - sound.c's
+ * real hardware path never sees it.
+ * --------------------------------------------------------------------- */
+static void *uac_writer_thread(void *arg) {
+    (void)arg;
+
+    while (uac_writer_running) {
+        unsigned head = atomic_load_explicit(&uac_q_head, memory_order_acquire);
+        unsigned tail = atomic_load_explicit(&uac_q_tail, memory_order_relaxed);
+        unsigned available = (head - tail) & UAC_QUEUE_MASK;
+
+        if (available < UAC_BUF_FRAMES) {
+            // Not enough queued yet - this thread isn't real-time
+            // critical (see above), so a plain short sleep is fine.
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 2000000L };  // 2ms
+            nanosleep(&ts, NULL);
+            continue;
+        }
+
+        for (int s = 0; s < UAC_BUF_FRAMES; s++) {
+            double i_val = uac_q_i[tail];
+            double q_val = uac_q_q[tail];
+            tail = (tail + 1) & UAC_QUEUE_MASK;
+
+            // Clamp to [-1, 1] before conversion
+            if (i_val >  1.0) i_val =  1.0;
+            if (i_val < -1.0) i_val = -1.0;
+            if (q_val >  1.0) q_val =  1.0;
+            if (q_val < -1.0) q_val = -1.0;
+
+            // Scale to 24-bit signed integer range and pack as 3-byte
+            // little-endian (SND_PCM_FORMAT_S24_3LE: [LSB, mid, MSB])
+            int32_t i_int = (int32_t)(i_val * 8388607.0);   // 2^23 - 1
+            int32_t q_int = (int32_t)(q_val * 8388607.0);
+
+            uint8_t *slot = uac_pcm_buf + s * UAC_FRAME_BYTES;
+            // I sample (left channel)
+            slot[0] = (uint8_t)( i_int        & 0xFF);
+            slot[1] = (uint8_t)((i_int >>  8) & 0xFF);
+            slot[2] = (uint8_t)((i_int >> 16) & 0xFF);
+            // Q sample (right channel)
+            slot[3] = (uint8_t)( q_int        & 0xFF);
+            slot[4] = (uint8_t)((q_int >>  8) & 0xFF);
+            slot[5] = (uint8_t)((q_int >> 16) & 0xFF);
+        }
+        atomic_store_explicit(&uac_q_tail, tail, memory_order_release);
+
+        // Flush a full period to the ALSA loopback. This can block (or
+        // fail) if nothing is draining the other side - that's now
+        // confined to this thread only.
+        snd_pcm_sframes_t written = snd_pcm_writei(
+            uac_pcm_handle, uac_pcm_buf, (snd_pcm_uframes_t)UAC_BUF_FRAMES);
+
+        if (written == -EPIPE) {
+            // Buffer underrun (most commonly: no host draining the
+            // gadget yet) - attempt recovery then retry once.
+            snd_pcm_prepare(uac_pcm_handle);
+            snd_pcm_writei(uac_pcm_handle, uac_pcm_buf,
+                           (snd_pcm_uframes_t)UAC_BUF_FRAMES);
+        } else if (written < 0) {
+            // Other ALSA error — log once, then recover
+            fprintf(stderr, "uac: snd_pcm_writei error: %s\n",
+                    snd_strerror((int)written));
+            snd_pcm_recover(uac_pcm_handle, (int)written, 1 /*silent*/);
+        }
+    }
+
+    return NULL;
+}
+
+/* ---------------------------------------------------------------------
  * Public API — see usb_gadget.h
  * --------------------------------------------------------------------- */
 
@@ -319,60 +440,47 @@ int uac_init(void) {
         return -1;
     }
 
+    uac_writer_running = 1;
+    if (pthread_create(&uac_writer_tid, NULL, uac_writer_thread, NULL) != 0) {
+        fprintf(stderr, "uac: failed to start writer thread\n");
+        uac_writer_running = 0;
+        snd_pcm_close(uac_pcm_handle);
+        uac_pcm_handle = NULL;
+        uac_gadget_destroy();
+        uac_gadget_up = 0;
+        return -1;
+    }
+
     uac_active = 1;
     printf("uac: USB IQ audio stream ready — device name: 'sBitx IQ'\n");
     return 0;
 }
 
 void uac_push_iq(double i_val, double q_val) {
-    if (!uac_pcm_handle || !uac_active) return;
+    if (!uac_active) return;
 
-    // Clamp to [-1, 1] before conversion
-    if (i_val >  1.0) i_val =  1.0;
-    if (i_val < -1.0) i_val = -1.0;
-    if (q_val >  1.0) q_val =  1.0;
-    if (q_val < -1.0) q_val = -1.0;
+    // Lock-free producer (see the writer-thread comment above): never
+    // blocks, never touches uac_q_tail. On overflow (writer thread
+    // stalled behind a slow/absent USB host) it silently drops the new
+    // sample rather than waiting - exactly hpsdr_p1.c's
+    // hpsdr_send_iq()/IQ_QUEUE pattern.
+    unsigned head = atomic_load_explicit(&uac_q_head, memory_order_relaxed);
+    unsigned tail = atomic_load_explicit(&uac_q_tail, memory_order_acquire);
+    unsigned next_head = (head + 1) & UAC_QUEUE_MASK;
+    if (next_head == tail) return;   // queue full - drop this sample
 
-    // Scale to 24-bit signed integer range and pack as 3-byte little-endian
-    // (SND_PCM_FORMAT_S24_3LE: bytes stored as [LSB, mid, MSB])
-    int32_t i_int = (int32_t)(i_val * 8388607.0);   // 2^23 - 1
-    int32_t q_int = (int32_t)(q_val * 8388607.0);
-
-    uint8_t *slot = uac_pcm_buf + uac_buf_pos * UAC_FRAME_BYTES;
-    // I sample (left channel)
-    slot[0] = (uint8_t)( i_int        & 0xFF);
-    slot[1] = (uint8_t)((i_int >>  8) & 0xFF);
-    slot[2] = (uint8_t)((i_int >> 16) & 0xFF);
-    // Q sample (right channel)
-    slot[3] = (uint8_t)( q_int        & 0xFF);
-    slot[4] = (uint8_t)((q_int >>  8) & 0xFF);
-    slot[5] = (uint8_t)((q_int >> 16) & 0xFF);
-
-    uac_buf_pos++;
-
-    if (uac_buf_pos >= UAC_BUF_FRAMES) {
-        // Flush a full period to the ALSA loopback
-        snd_pcm_sframes_t written = snd_pcm_writei(
-            uac_pcm_handle, uac_pcm_buf, (snd_pcm_uframes_t)UAC_BUF_FRAMES);
-
-        if (written == -EPIPE) {
-            // Buffer underrun: attempt recovery then retry once
-            snd_pcm_prepare(uac_pcm_handle);
-            snd_pcm_writei(uac_pcm_handle, uac_pcm_buf,
-                           (snd_pcm_uframes_t)UAC_BUF_FRAMES);
-        } else if (written < 0) {
-            // Other ALSA error — log once, then recover
-            fprintf(stderr, "uac: snd_pcm_writei error: %s\n",
-                    snd_strerror((int)written));
-            snd_pcm_recover(uac_pcm_handle, (int)written, 1 /*silent*/);
-        }
-
-        uac_buf_pos = 0;
-    }
+    uac_q_i[head] = i_val;
+    uac_q_q[head] = q_val;
+    atomic_store_explicit(&uac_q_head, next_head, memory_order_release);
 }
 
 void uac_stop(void) {
     uac_active = 0;
+
+    if (uac_writer_running) {
+        uac_writer_running = 0;
+        pthread_join(uac_writer_tid, NULL);
+    }
 
     if (uac_pcm_handle) {
         snd_pcm_drain(uac_pcm_handle);
