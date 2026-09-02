@@ -34,11 +34,26 @@
  *     and the HPSDR UDP stream are two separate consumers of the same IQ,
  *     and neither module has a dependency on the other.
  *
+ *   Producer/consumer split (see usb_gadget.c's uac_writer_thread()
+ *   comment for the full incident this fixed): uac_push_iq() only ever
+ *   enqueues into a lock-free ring buffer and never blocks - the same
+ *   architecture hpsdr_p1.c's IQ queue uses, and for the same reason.
+ *   A dedicated uac_writer_thread() is the sole consumer: it drains the
+ *   queue and performs the (potentially blocking, if no USB host is
+ *   actually draining the gadget yet) ALSA write on its own thread.
+ *   Without this split, a stalled or absent USB host could block
+ *   sound.c's real-time SCHED_FIFO audio thread and cause real hardware
+ *   xruns on hw:0,0 - a completely unrelated failure with no obvious
+ *   cause from the symptom alone. See
+ *   docs/usb_gadget_os_setup.md for how this was diagnosed on real
+ *   hardware.
+ *
  *   ALSA loopback bridge:
  *     Linux's snd-aloop module creates a pair of back-to-back PCM devices.
- *     The gadget's UAC2 function reads from one side; we write to the other
- *     via a standard PCM write call. This avoids any kernel-module custom
- *     code and works on any Linux distro with snd-aloop loaded.
+ *     The gadget's UAC2 function reads from one side; uac_writer_thread()
+ *     writes to the other via a standard PCM write call. This avoids any
+ *     kernel-module custom code and works on any Linux distro with
+ *     snd-aloop loaded.
  *
  * Configfs gadget path layout (created by uac_gadget_create() in
  * usb_gadget.c):
@@ -68,8 +83,13 @@
  * Thread safety:
  *   uac_init()/uac_stop() are meant to be called once, from main(), around
  *   hpsdr_init()/hpsdr_poll(). uac_push_iq() runs on minibitx's audio
- *   thread (same thread that calls hpsdr_send_iq()). No locking is needed
- *   — the ALSA PCM handle is only ever written by that one thread.
+ *   thread (same thread that calls hpsdr_send_iq()) and only ever touches
+ *   the lock-free queue - it never blocks and never touches the ALSA PCM
+ *   handle directly. uac_writer_thread() (internal to usb_gadget.c) is
+ *   the only thing that ever calls into ALSA on uac_pcm_handle - no lock
+ *   is needed between the two: the queue's atomic head/tail split
+ *   ownership exactly like hpsdr_p1.c's IQ queue (producer writes head
+ *   only, consumer writes tail only).
  */
 
 #ifndef USB_GADGET_H
@@ -82,9 +102,12 @@
  * running over HPSDR/UDP either way. */
 int uac_init(void);
 
-/* Deliver one 48 kHz IQ sample pair, normalized to [-1.0, +1.0]. Buffers
- * internally and flushes to the ALSA loopback one period at a time. No-op
- * if uac_init() hasn't succeeded (or after uac_stop()). */
+/* Deliver one 48 kHz IQ sample pair, normalized to [-1.0, +1.0]. Enqueues
+ * into a lock-free ring buffer for uac_writer_thread() to drain and flush
+ * to the ALSA loopback one period at a time - never blocks; silently
+ * drops the sample if the queue is full (writer thread stalled behind a
+ * slow/absent USB host). No-op if uac_init() hasn't succeeded (or after
+ * uac_stop()). */
 void uac_push_iq(double i_val, double q_val);
 
 /* Tear down the gadget and release the ALSA PCM handle. Safe to call even
