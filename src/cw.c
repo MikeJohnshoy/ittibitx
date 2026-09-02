@@ -22,12 +22,9 @@
 
 #define CW_ENVELOPE_LEN 480
 
-// Sidetone/keying pitch - what the operator actually hears on the local
-// monitor (see cw_get_sample() / SIDETONE_SCALE in sound.c). This is what
-// a real CW pitch control would adjust. It is NOT the frequency written
-// to the DAC's TX-feeding (right) channel - see TX_IF_OFFSET_HZ below and
-// cw_get_tx_sample().
-#define CW_PITCH_HZ 700
+// CW_PITCH_HZ (the sidetone/keying pitch) now lives in cw.h - radio.c
+// needs it too, to correct clk2 during TX (see cw.h's comment on it and
+// radio_tx_apply() in radio.c).
 
 // Where the actual TX-modulating tone sits, relative to CW_PITCH_HZ.
 //
