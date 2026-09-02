@@ -5,7 +5,7 @@ STATUS:
 - Receive functions are working
 - CW transmit working 
 
-This code allows sbitx hardware use by SDR software like Quisk or
+This code allows sbitx hardware to be used by SDR software like Quisk or
 SDRConsole, without having the full sBitx application running.  minibitx runs
 on the Raspberry Pi board inside your sbitx in place of
 the `sbitx` software that came with the radio. It has no
