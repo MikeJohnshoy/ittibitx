@@ -117,7 +117,7 @@ the BFO off-center like this, the *difference* product lands right at
 the filter's real center (deep in the passband) while the *sum* product
 lands far into the stopband — see "Crystal filter" below. Before this,
 `cw.c` fed a bare 700 Hz tone straight into this same mixer, so both
-products (`bfo_freq` ± 700 Hz) landed within ~5-6 kHz of each other, far
+products (`bfo_freq` ± 700 Hz) landed within ~1-2 kHz of each other, far
 too close together for this filter to tell apart — see "Known
 limitations" for how that showed up on the air.
 
