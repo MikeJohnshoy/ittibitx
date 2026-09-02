@@ -232,7 +232,7 @@ never anything hardware-facing:
 
 - **Image suppressed, not eliminated (~40dB).** The `TX_IF_OFFSET_HZ`
   placement (see "Mixer 2" above) fixed what used to be a genuine DSB
-  problem (two equal-strength tones 1.4 kHz apart) — confirmed on-air,
+  problem in minibitx (two equal-strength tones 1.4 kHz apart) — confirmed on-air,
   on two independent SDR displays, at roughly 40dB of suppression
   between the wanted and unwanted product. That's real, usable
   single(-ish)-sideband CW, comparable to what many communications-grade
