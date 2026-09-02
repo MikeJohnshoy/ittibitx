@@ -8,7 +8,7 @@ STATUS:
 This code allows sbitx hardware to be used by SDR software like Quisk or
 SDRConsole, without having the full sBitx application running.  minibitx runs
 on the Raspberry Pi board inside your sbitx in place of
-the `sbitx` software that came with the radio. It has no
+the sbitx software that came with the radio. It has no
 dependency on the sbitx software and expects to run stand-alone.  
 
 minibitx supports connecting to the sbitx hardware via HPSDR Protocol 1 and/or USB
