@@ -217,7 +217,7 @@ static int uac_gadget_create(void) {
     snprintf(path, sizeof(path), "%s/strings/0x409/manufacturer", UAC_GADGET_ROOT);
     uac_write_attr(path, "sBitx");
     snprintf(path, sizeof(path), "%s/strings/0x409/product", UAC_GADGET_ROOT);
-    uac_write_attr(path, "sBitx IQ");
+    uac_write_attr(path, "minibitx IQ");
     snprintf(path, sizeof(path), "%s/strings/0x409/serialnumber", UAC_GADGET_ROOT);
     uac_write_attr(path, "0000001");
 
@@ -388,14 +388,14 @@ static int uac_alsa_open(void) {
  * ever calls snd_pcm_writei() on it.
  *
  * BUG FIX (reported: enabling the USB gadget alone, with no host
- * actually draining "sBitx IQ" yet, reintroduced sound.c's real
+ * actually draining "minibitx IQ" yet, reintroduced sound.c's real
  * hardware xrun flood on hw:0,0 - the exact failure mode already fixed
  * once this project for hpsdr_p1.c, just in a different file). The
  * previous version of this file did the ALSA loopback write inline,
  * synchronously, from uac_push_iq() - which is called from
  * sound_process(), on sound.c's SCHED_FIFO real-time audio thread. If
  * nothing is reading the *other* side of the snd-aloop pair (no host
- * plugged in, or plugged in but no app has opened "sBitx IQ" for
+ * plugged in, or plugged in but no app has opened "minibitx IQ" for
  * capture yet), that loopback's ring buffer fills within a few blocks
  * and every subsequent snd_pcm_writei() call here returns -EPIPE,
  * triggering an snd_pcm_prepare()+retry - real kernel/ioctl work,
