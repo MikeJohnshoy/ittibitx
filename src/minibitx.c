@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
 
-  printf("Starting miniBitx IQ Streamer and control interface...\n");
+  printf("Starting miniBitx hardware interface & SDR server...\n");
 
   // Installed first, before anything below can fail/return early - every
   // _stop() function called from the shutdown sequence already guards on
