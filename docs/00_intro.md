@@ -6,7 +6,7 @@ minibitx runs on the Raspberry Pi inside an sbitx radio, in place of the
 `sbitx` software that shipped with it. It brings the hardware up, exposes
 a rigctld-compatible control port, and streams baseband I/Q out over
 HPSDR Protocol 1 (UDP) and/or a USB Audio Class 2 gadget. An external SDR
-application — Quisk, SDR Console, WSJT-X's rig-control layer, etc. — does
+application — SDR Console, Quisk, WSJT-X's rig-control layer, etc. — does
 everything downstream of that: FFT display and waterfall, demodulation of
 whatever mode is in use, filtering, and audio routing.
 
