@@ -158,6 +158,17 @@ static int uac_gadget_create(void) {
         return -1;
     }
 
+    // Any gadget directory that exists from here on needs cleaning up on
+    // exit, whether or not the rest of this function (in particular the
+    // bind at the very end) actually succeeds - see uac_stop(), which
+    // only calls uac_gadget_destroy() when this is set. Previously this
+    // was only set by uac_init() after a full success, so a run whose
+    // bind attempt failed (exactly the case this whole function exists
+    // to recover from) would skip cleanup on its own exit too, leaving
+    // the mess for the *next* start's self-heal check below instead of
+    // fixing it now.
+    uac_gadget_up = 1;
+
     // If this gadget is left over from a previous run, it may still be
     // BOUND to a UDC from back then - "leftover but idle" isn't actually
     // possible here, since binding to a UDC is the very last step below,
@@ -171,7 +182,7 @@ static int uac_gadget_create(void) {
     // the first, since nothing in this process's normal shutdown paths -
     // there mostly aren't any; see minibitx.c's main() - ever unbinds it).
     // Unbind first if so; safe/idempotent even when nothing was actually
-    // bound (writing "" to an already-empty UDC file is a no-op).
+    // bound (writing "\n" to an already-empty UDC file is a no-op).
     snprintf(path, sizeof(path), "%s/UDC", UAC_GADGET_ROOT);
     {
         FILE *udc_check = fopen(path, "r");
@@ -182,7 +193,11 @@ static int uac_gadget_create(void) {
             fclose(udc_check);
             if (cur[0] != '\0') {
                 printf("uac: gadget still bound to '%s' from a previous run - unbinding first\n", cur);
-                uac_write_attr(path, "");
+                // NOT "" - see uac_gadget_destroy()'s comment on why an
+                // actually-empty (0-byte) write here doesn't work, even
+                // though it looks equivalent.
+                if (uac_write_attr(path, "\n") < 0)
+                    fprintf(stderr, "uac: unbind write failed: %s\n", strerror(errno));
             }
         }
         // ENOENT here just means no leftover tree at all (first boot,
@@ -270,9 +285,19 @@ static int uac_gadget_create(void) {
 static void uac_gadget_destroy(void) {
     char path[256];
 
-    // Unbind: write empty string to UDC
+    // Unbind: write a single newline to UDC - NOT a true empty (0-byte)
+    // write. uac_write_attr(path, "") passes strlen("") == 0 through to
+    // write(2), and a 0-length write here does not reliably reach the
+    // kernel gadget driver's UDC store callback (bench-confirmed: the
+    // write "succeeds" - uac_write_attr() returns 0, since 0 bytes
+    // requested really did become 0 bytes written - but the gadget stays
+    // bound, and the next bind attempt still fails with EBUSY). The
+    // universally-used shell idiom for this is `echo "" > UDC`, which
+    // writes one byte (a newline), not zero - matching that exactly
+    // rather than what looks like the more literal translation of "empty
+    // string" is what actually triggers the kernel's unbind path.
     snprintf(path, sizeof(path), "%s/UDC", UAC_GADGET_ROOT);
-    uac_write_attr(path, "");
+    uac_write_attr(path, "\n");
 
     // Remove the function symlink from the config
     snprintf(path, sizeof(path), "%s/configs/c.1/uac2.0", UAC_GADGET_ROOT);
@@ -462,10 +487,12 @@ static void *uac_writer_thread(void *arg) {
 
 int uac_init(void) {
     if (uac_gadget_create() < 0) {
-        // uac_gadget_create already printed the reason
+        // uac_gadget_create already printed the reason. Note: it may
+        // still have left a gadget directory that needs cleanup - it
+        // sets uac_gadget_up itself now (as soon as it creates one),
+        // precisely so a failed bind here doesn't skip that cleanup.
         return -1;
     }
-    uac_gadget_up = 1;
 
     if (uac_alsa_open() < 0) {
         uac_gadget_destroy();
