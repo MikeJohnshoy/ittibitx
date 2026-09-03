@@ -99,8 +99,11 @@ called once, from `main()`, alongside board revision detection above —
 the write fails. `read_voltage_current()` then reads the voltage and
 current registers (1.25 mV/LSB and 1.25 mA/LSB respectively) on demand,
 treating an all-ones current reading as out-of-range/invalid rather than
-a real value. Used for status reporting (`status.c`), not for any
-control decision.
+a real value. Not currently called from anywhere — available for future
+status/telemetry reporting (`status.c` exists for that, though it isn't
+wired into `main()` any more either — see
+[`05_process_and_threading_model.md`](05_process_and_threading_model.md)),
+not for any control decision.
 
 ## si5351 oscillator and I2C bus
 
