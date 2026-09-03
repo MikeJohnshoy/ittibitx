@@ -11,7 +11,6 @@
 #include "radio.h"
 #include "radio_hw.h"
 #include "usb_gadget.h"
-#include "status.h"
 #include "hamlib.h"
 #include "hw_settings.h"
 #include "cw.h"
@@ -113,6 +112,20 @@ int main(int argc, char **argv) {
   cw_init();
   printf("init: CW straight key ready (GPIO %d)\n", CW_KEY);
 
+  // Bring up the rigctld-compatible control surface (src/hamlib.c) first -
+  // not a hard failure if the port's unavailable, same as HPSDR/UAC2.
+  // hamlib_init() reports its own success ("init: Hamlib/rigctld
+  // listening..."); we only need to report the failure case here. Started
+  // before HPSDR so startup order is the exact reverse of the shutdown
+  // sequence below (sound -> uac -> hpsdr -> hamlib) - the two have no
+  // dependency on each other either way (separate sockets, separate
+  // threads, neither calls into the other), so this is purely for that
+  // symmetry, not because the old order was broken.
+  if (hamlib_init(HAMLIB_PORT) < 0) {
+    printf("init: Hamlib/rigctld unavailable on TCP %d, continuing without it\n",
+           HAMLIB_PORT);
+  }
+
   // Initialize Networking (HPSDR Protocol 1)
   if (hpsdr_init() < 0) {
     fprintf(stderr, "init: HPSDR socket bind failed\n");
@@ -120,15 +133,6 @@ int main(int argc, char **argv) {
   }
   hpsdr_poll(); // Starts the listener thread for connection/tuning requests
   printf("init: HPSDR Protocol 1 listening on UDP %d\n", HPSDR_PORT);
-
-  // Bring up the rigctld-compatible control surface (src/hamlib.c) -
-  // not a hard failure if the port's unavailable, same as HPSDR/UAC2.
-  // hamlib_init() reports its own success ("init: Hamlib/rigctld
-  // listening..."); we only need to report the failure case here.
-  if (hamlib_init(HAMLIB_PORT) < 0) {
-    printf("init: Hamlib/rigctld unavailable on TCP %d, continuing without it\n",
-           HAMLIB_PORT);
-  }
 
   // Bring up the USB Audio Class (UAC2) IQ gadget, if the hardware/kernel
   // support it (needs a USB device-mode controller and snd-aloop). Not a
@@ -150,14 +154,6 @@ int main(int argc, char **argv) {
   printf("init: audio capture running (hw:0,0 @ 96000 Hz)\n");
 
   printf("minibitx: radio hardware initialization complete, ready to serve!\n");
-
-  // One-time snapshot of frequency/RX-TX/drive state at the moment control
-  // passes to whatever external app connects next. status_print() redraws
-  // in place on a terminal (see status.c), so it's only ever called this
-  // once now - a trailing newline here keeps that from being overwritten
-  // by whatever prints next.
-  status_print();
-  if (isatty(fileno(stdout))) putchar('\n');
 
   // minibitx idle loop: keep the program alive until asked to shut down.
   // Operational state changes (tuning, PTT) are reported as they're
