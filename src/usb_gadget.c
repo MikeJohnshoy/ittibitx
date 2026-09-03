@@ -512,7 +512,7 @@ int uac_init(void) {
     }
 
     uac_active = 1;
-    printf("uac: USB IQ audio stream ready — device name: 'sBitx IQ'\n");
+    printf("uac: USB IQ audio stream ready — device name: 'minibitx IQ'\n");
     return 0;
 }
 
