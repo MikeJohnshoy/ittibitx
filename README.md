@@ -17,7 +17,7 @@ status display.  The external SDR application must supply all of the
 receive/transmit signal processing: spectrum and waterfall, demodulation, filtering, and
 audio routing. minibitx started as a trimmed-down and more modular version of the much larger sbitx
 codebase, keeping only the minimum needed for an external SDR app to work with the
-hardware.
+hardware.  
 
 ## Building
 
