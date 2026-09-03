@@ -5,19 +5,18 @@ STATUS:
 - Receive functions are working
 - CW transmit working 
 
-This code allows sbitx hardware to be used by SDR software like Quisk or
-SDRConsole, without having the full sBitx application running.  minibitx runs
+This code allows sbitx hardware to be used by SDR software like
+SDRConsole or Quisk, without having the full sBitx application running.  minibitx runs
 on the Raspberry Pi board inside your sbitx in place of
-the sbitx software that came with the radio. It has no
-dependency on the sbitx software and expects to run stand-alone.  
+the sbitx software. It has no dependency on the sbitx software and expects to run stand-alone.  
 
 minibitx supports connecting to the sbitx hardware via HPSDR Protocol 1 and/or USB
-audio.  The sbitx hardware can also be controlled via a small set of HAMLIB/rigctl commands.
+audio.  It also supports a small set of HAMLIB/rigctl commands.
 It provides no user interface of its own beyond the console
 status display.  The external SDR application must supply all of the
 receive/transmit signal processing: spectrum and waterfall, demodulation, filtering, and
 audio routing. minibitx started as a trimmed-down and more modular version of the much larger sbitx
-codebase, keeping only what's needed for an external SDR app to work with the
+codebase, keeping only the minimum needed for an external SDR app to work with the
 hardware.
 
 ## Building
