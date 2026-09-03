@@ -218,14 +218,47 @@ something explicitly unbinds it.
 Fixed in `usb_gadget.c`: `uac_gadget_create()` now checks the leftover
 gadget's `UDC` file *before* trying to (re)bind - if it already names a
 controller, that means a previous run left it bound, so it's unbound
-first (`echo "" > .../UDC`, the same step `uac_gadget_destroy()` already
-does on a clean shutdown) before reconfiguring and rebinding. This is
-self-healing regardless of *how* the previous process ended - a clean
-exit, Ctrl+C, a crash, or `SIGKILL` all leave the same on-disk state,
-and this check repairs all of them the same way, rather than depending
-on catching every possible termination signal - which matters because
-`SIGKILL` and a crash genuinely can't be caught, so this backstop is the
-only thing that covers those two cases regardless of anything else.
+first before reconfiguring and rebinding. This is self-healing
+regardless of *how* the previous process ended - a clean exit, Ctrl+C, a
+crash, or `SIGKILL` all leave the same on-disk state, and this check
+repairs all of them the same way, rather than depending on catching
+every possible termination signal - which matters because `SIGKILL` and
+a crash genuinely can't be caught, so this backstop is the only thing
+that covers those two cases regardless of anything else.
+
+**A second bug hid inside the first fix's own unbind call**
+(bench-confirmed 2026-09): the self-heal check above - and
+`uac_gadget_destroy()`'s normal clean-shutdown unbind, which has the
+same code - originally wrote a true empty string to `UDC`
+(`uac_write_attr(path, "")`). `uac_write_attr()` writes exactly
+`strlen(value)` bytes, and `strlen("") == 0`, so this was a genuine
+0-byte `write(2)` call. That call "succeeds" (0 bytes requested, 0
+bytes written), but a 0-length write does not reliably reach the kernel
+gadget driver's `UDC` store callback at all - so the gadget stayed
+bound, and the very next bind attempt still failed with `EBUSY`, on
+every single restart, even though the log showed the self-heal message
+firing and reporting no error. The universal shell idiom for this,
+`echo "" > UDC`, actually writes **one byte** - the newline `echo`
+appends - not zero; that one byte is what actually reaches the store
+callback and triggers the real unbind. Fixed by writing `"\n"` instead
+of `""` at both call sites (`uac_gadget_create()`'s self-heal check and
+`uac_gadget_destroy()`). A third, smaller gap fixed alongside this:
+`uac_gadget_up` (which gates whether `uac_stop()` calls
+`uac_gadget_destroy()` at all) used to only get set after a *fully*
+successful `uac_init()` - so a run whose own bind attempt failed left
+nothing to clean it up on that same run's shutdown either, silently
+pushing the problem onto the next start's self-heal check instead of
+fixing it immediately. `uac_gadget_create()` now sets it itself, as soon
+as it creates or finds a gadget directory, regardless of whether the
+bind at the end succeeds.
+
+If you're seeing the exact symptom this section originally described
+(gadget "still bound" on every restart, never actually recovering) on a
+binary built before this second fix, rebuild and just start minibitx
+again - no manual `rmmod`/reboot should be needed, since the corrected
+unbind write now actually reaches the kernel. A reboot is still the
+fallback if it's ever wedged deeper than that (this fix addresses the
+mechanism actually observed, not every conceivable failure mode).
 
 Separately, `minibitx.c` now also installs a `SIGINT`/`SIGTERM` handler
 (Ctrl+C and a normal `kill`/`systemctl stop`, respectively - not
