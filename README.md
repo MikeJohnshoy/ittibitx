@@ -1,7 +1,7 @@
 # minibitx — an experimental test bed
 
 STATUS: 
-- Network connection using HPSDR Protocol 1 works
+- Network connection using HPSDR Protocol 1 or USB audio gadget works
 - Receive functions are working
 - CW transmit working 
 
