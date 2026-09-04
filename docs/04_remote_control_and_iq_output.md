@@ -75,7 +75,7 @@ on `usb_gadget.c` — each holds its own independent copy of the I/Q.
 
 `usb_gadget.c` presents the radio as a standard USB Audio Class 2.0
 capture device, if the hardware/kernel support it (needs a USB
-device-mode controller and `snd-aloop`) - see
+device-mode controller and `libcomposite`) - see
 [`usb_gadget_os_setup.md`](usb_gadget_os_setup.md) for the Raspberry Pi 4
 config.txt/cmdline.txt changes and GPIO-power caveat this requires; it is
 not on by default on a stock Raspberry Pi OS install. It's fed its own I/Q copy
