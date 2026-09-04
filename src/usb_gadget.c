@@ -98,9 +98,10 @@ static int uac_symlink(const char *target, const char *link) {
     return 0;
 }
 
-// Probe for the first available ALSA loopback card by scanning /proc/asound.
-// Sets card_idx to the card number and returns 0 on success, -1 if not found.
-static int uac_find_loopback_card(int *card_idx) {
+// Probe for an ALSA card whose /proc/asound/cardN/id matches target_id
+// exactly. Sets card_idx to the card number and returns 0 on success,
+// -1 if not found.
+static int uac_find_card_by_id(const char *target_id, int *card_idx) {
     for (int c = 0; c < 32; c++) {
         char path[64];
         snprintf(path, sizeof(path), "/proc/asound/card%d/id", c);
@@ -110,7 +111,7 @@ static int uac_find_loopback_card(int *card_idx) {
         if (fgets(id, sizeof(id), f)) {
             // Strip trailing newline
             id[strcspn(id, "\n")] = '\0';
-            if (strcmp(id, "Loopback") == 0) {
+            if (strcmp(id, target_id) == 0) {
                 *card_idx = c;
                 fclose(f);
                 return 0;
@@ -118,7 +119,7 @@ static int uac_find_loopback_card(int *card_idx) {
         }
         fclose(f);
     }
-    return -1;   // snd-aloop not loaded or no loopback card present
+    return -1;
 }
 
 // Detect the first UDC (USB Device Controller) available on this system by
@@ -217,7 +218,7 @@ static int uac_gadget_create(void) {
     snprintf(path, sizeof(path), "%s/strings/0x409/manufacturer", UAC_GADGET_ROOT);
     uac_write_attr(path, "sBitx");
     snprintf(path, sizeof(path), "%s/strings/0x409/product", UAC_GADGET_ROOT);
-    uac_write_attr(path, "minibitx IQ");
+    uac_write_attr(path, "sBitx IQ");
     snprintf(path, sizeof(path), "%s/strings/0x409/serialnumber", UAC_GADGET_ROOT);
     uac_write_attr(path, "0000001");
 
@@ -318,24 +319,50 @@ static void uac_gadget_destroy(void) {
 }
 
 /* ---------------------------------------------------------------------
- * ALSA loopback PCM setup
+ * UAC2 gadget ALSA PCM setup
  * --------------------------------------------------------------------- */
 
-// Open and configure the ALSA loopback PCM for write (playback side).
-// The UAC2 function driver in the kernel reads the capture side of the same
-// loopback card and feeds it to the USB host as the audio stream.
+// Open and configure the UAC2 gadget's own ALSA PCM for write (playback
+// side). Once uac_gadget_create() binds the gadget to a UDC, the kernel's
+// UAC2 function driver (u_audio/f_uac2) registers its OWN independent ALSA
+// card for it - always reported with id "UAC2Gadget" in
+// /proc/asound/cards (bench-confirmed; this comes from the driver itself,
+// not from anything sbitx_iq-specific we configure via configfs, so it's
+// stable regardless of the gadget's configfs instance name). That card's
+// local "playback" PCM device (device 0) is what's actually wired to the
+// real USB isochronous endpoint the connected host reads as its capture/
+// recording stream - writing here is what reaches the host; nothing else
+// does.
+//
+// An earlier version of this function instead wrote to a separate
+// `snd-aloop` "Loopback" card, on the mistaken assumption that the UAC2
+// function reads its capture-side data from that loopback pair
+// automatically. It doesn't: snd-aloop creates a fully self-contained
+// pair of PCM devices with no relationship to any other card, so every
+// sample written there stayed local to the Pi and never reached the USB
+// link at all. That bug was invisible from minibitx's own console (the
+// ALSA write to the loopback "succeeded" either way) and invisible from
+// the host's side too (USB enumeration and configuration only depend on
+// the configfs descriptors, not on what's actually feeding the PCM) - the
+// only symptom was silence in the recording app, which is what exposed it
+// (bench-confirmed 2026-09: 0 amplitude on a strong FT8 signal in
+// Audacity on Windows, with the host-side descriptors otherwise fully
+// correct and Current Config Value accepted). See
+// docs/usb_gadget_os_setup.md §11 for the full bench story.
 // Returns 0 on success, -1 on ALSA error.
 static int uac_alsa_open(void) {
-    // Locate the loopback card index
     int card_idx = -1;
-    if (uac_find_loopback_card(&card_idx) < 0) {
-        fprintf(stderr, "uac: snd-aloop not loaded — run: modprobe snd-aloop\n");
+    if (uac_find_card_by_id("UAC2Gadget", &card_idx) < 0) {
+        fprintf(stderr, "uac: UAC2Gadget ALSA card not found - is the gadget bound to a UDC?\n");
         return -1;
     }
 
-    // Playback side of the loopback: device 0, subdevice 1
+    // Device 0's playback substream - the local write side that feeds the
+    // host's capture stream. Device 0's *capture* substream is the reverse
+    // direction (host-to-device audio, unused here - see p_srate/p_ssize/
+    // p_chmask in uac_gadget_create()), not this device string.
     char dev_name[64];
-    snprintf(dev_name, sizeof(dev_name), "hw:%d,0,1", card_idx);
+    snprintf(dev_name, sizeof(dev_name), "hw:%d,0", card_idx);
 
     int err;
     if ((err = snd_pcm_open(&uac_pcm_handle, dev_name,
@@ -378,7 +405,7 @@ static int uac_alsa_open(void) {
         return -1;
     }
 
-    printf("uac: ALSA loopback PCM opened: %s @ %u Hz, 24-bit, %d ch\n",
+    printf("uac: UAC2Gadget ALSA PCM opened: %s @ %u Hz, 24-bit, %d ch\n",
            dev_name, rate, UAC_CHANNELS);
     return 0;
 }
@@ -388,16 +415,16 @@ static int uac_alsa_open(void) {
  * ever calls snd_pcm_writei() on it.
  *
  * BUG FIX (reported: enabling the USB gadget alone, with no host
- * actually draining "minibitx IQ" yet, reintroduced sound.c's real
+ * actually draining "sBitx IQ" yet, reintroduced sound.c's real
  * hardware xrun flood on hw:0,0 - the exact failure mode already fixed
  * once this project for hpsdr_p1.c, just in a different file). The
- * previous version of this file did the ALSA loopback write inline,
+ * previous version of this file did the ALSA write inline,
  * synchronously, from uac_push_iq() - which is called from
  * sound_process(), on sound.c's SCHED_FIFO real-time audio thread. If
- * nothing is reading the *other* side of the snd-aloop pair (no host
- * plugged in, or plugged in but no app has opened "minibitx IQ" for
- * capture yet), that loopback's ring buffer fills within a few blocks
- * and every subsequent snd_pcm_writei() call here returns -EPIPE,
+ * nothing is reading the other end of this PCM (no host plugged in, or
+ * plugged in but no app has opened "sBitx IQ" for capture yet), the
+ * gadget's own ring buffer fills within a few blocks and every
+ * subsequent snd_pcm_writei() call here returns -EPIPE,
  * triggering an snd_pcm_prepare()+retry - real kernel/ioctl work,
  * paid for on the audio thread, every ~10.7ms, forever, silently (this
  * function printed nothing on -EPIPE). That's enough added latency per
@@ -410,7 +437,7 @@ static int uac_alsa_open(void) {
  * thread) now only ever touches the lock-free queue above - it can't
  * block, and drops samples silently on overflow instead. This thread
  * is the sole consumer: it waits for a full period's worth of samples,
- * packs and writes them to the loopback PCM exactly as before, and if
+ * packs and writes them to the gadget's PCM exactly as before, and if
  * that blocks or errors, only USB audio quality suffers - sound.c's
  * real hardware path never sees it.
  * --------------------------------------------------------------------- */
@@ -458,7 +485,7 @@ static void *uac_writer_thread(void *arg) {
         }
         atomic_store_explicit(&uac_q_tail, tail, memory_order_release);
 
-        // Flush a full period to the ALSA loopback. This can block (or
+        // Flush a full period to the gadget's PCM. This can block (or
         // fail) if nothing is draining the other side - that's now
         // confined to this thread only.
         snd_pcm_sframes_t written = snd_pcm_writei(
@@ -512,7 +539,7 @@ int uac_init(void) {
     }
 
     uac_active = 1;
-    printf("uac: USB IQ audio stream ready — device name: 'minibitx IQ'\n");
+    printf("uac: USB IQ audio stream ready — device name: 'sBitx IQ'\n");
     return 0;
 }
 
