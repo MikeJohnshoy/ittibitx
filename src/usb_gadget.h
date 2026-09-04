@@ -64,12 +64,28 @@
  *   docs/usb_gadget_os_setup.md for how this was diagnosed on real
  *   hardware.
  *
- *   ALSA loopback bridge:
- *     Linux's snd-aloop module creates a pair of back-to-back PCM devices.
- *     The gadget's UAC2 function reads from one side; uac_writer_thread()
- *     writes to the other via a standard PCM write call. This avoids any
- *     kernel-module custom code and works on any Linux distro with
- *     snd-aloop loaded.
+ *   ALSA delivery — direct to the gadget's own card:
+ *     Binding the UAC2 function to a UDC (uac_gadget_create()) makes the
+ *     kernel's u_audio/f_uac2 driver register its own independent ALSA
+ *     card for it, always reported with id "UAC2Gadget" in
+ *     /proc/asound/cards. uac_writer_thread() opens that card's own
+ *     device-0 playback PCM directly and writes to it with a standard
+ *     snd_pcm_writei() call - that PCM is what the kernel driver actually
+ *     streams out over the real USB isochronous endpoint the host reads
+ *     as its capture/recording stream.
+ *
+ *     An earlier version of this routed through a separate snd-aloop
+ *     "Loopback" card instead, on the mistaken assumption that the UAC2
+ *     function reads its capture-side data from that loopback pair
+ *     automatically. It doesn't - snd-aloop's pair is fully self-
+ *     contained, so every sample written there stayed local to the Pi
+ *     and never reached the USB link. That bug was invisible at every
+ *     enumeration/configuration layer (both minibitx's own console and
+ *     the host's USB descriptors looked entirely correct); the only
+ *     symptom was silence in a recording app on the host side, which is
+ *     what exposed it (bench-confirmed 2026-09; see
+ *     docs/usb_gadget_os_setup.md §11). snd-aloop is not used by this
+ *     file any more.
  *
  * Configfs gadget path layout (created by uac_gadget_create() in
  * usb_gadget.c):
@@ -91,9 +107,10 @@
  *       p_chmask = 3
  *
  * Dependencies (must be present on the target system):
- *   Kernel modules : dwc2 (or other device-mode UDC), libcomposite, snd-aloop
- *   Userspace libs : libasound2-dev (ALSA — for PCM write to loopback;
- *                    minibitx already links -lasound for sound.c)
+ *   Kernel modules : dwc2 (or other device-mode UDC), libcomposite
+ *   Userspace libs : libasound2-dev (ALSA — for PCM write to the
+ *                    UAC2Gadget card; minibitx already links -lasound
+ *                    for sound.c)
  *   Kernel config  : CONFIG_USB_CONFIGFS_F_UAC2=y
  *
  * Thread safety:
