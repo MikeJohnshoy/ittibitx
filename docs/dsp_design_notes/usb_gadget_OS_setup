@@ -430,6 +430,25 @@ name) and opens its device-0 playback PCM (`hw:N,0`) instead of any
 project at all - removed from §3's `modules-load.d` file and from
 `usb_gadget.h`'s dependency list.
 
+**Bench-observed immediately after this fix**: with the real
+`UAC2Gadget` card wired up, `uac_writer_thread()`'s `snd_pcm_writei()`
+calls started failing with `Input/output error` (`-EIO`) - continuously,
+one line per ~10.7ms period, forever - as soon as minibitx started, well
+before any host was attached. This is expected, not a regression: unlike
+the old `snd-aloop` path (which silently buffered writes with nothing
+ever reading them - the bug this section fixes), the real gadget PCM
+correctly refuses writes outright whenever no USB host has actually
+activated the capture streaming interface (cable unplugged, or plugged
+in but no app has opened the stream for reading yet) - the kernel can't
+queue endpoint requests in that state. It should clear up on its own
+once a host attaches and starts draining. The flood of identical log
+lines was still worth fixing on its own: `uac_writer_thread()` now
+throttles this to the first occurrence and then one line per ~500
+consecutive failures (~5s), tagging it "(host not draining? N
+consecutive)" rather than repeating forever unthrottled.
+
 Not yet re-verified against real hardware as of this writing - update
 this section once an SDR/audio app on the host actually shows a live
-signal.
+signal (with a host genuinely attached and draining, the `-EIO` flood
+above should also disappear on its own - if it doesn't, that's the next
+thing to chase).
