@@ -444,9 +444,12 @@ static int uac_alsa_open(void) {
 static void *uac_writer_thread(void *arg) {
     (void)arg;
 
-    // Consecutive-failure counter for the throttled logging below - see
-    // the comment at the write-error handling at the bottom of the loop.
+    // err_streak drives the backoff below; host_was_draining exists only
+    // to log state *transitions* ("no host" / "host back") once each,
+    // rather than repeating on every attempt - see the write-error
+    // handling at the bottom of the loop for both.
     unsigned err_streak = 0;
+    int host_was_draining = 1;   // optimistic initial assumption
 
     while (uac_writer_running) {
         unsigned head = atomic_load_explicit(&uac_q_head, memory_order_acquire);
@@ -459,6 +462,31 @@ static void *uac_writer_thread(void *arg) {
             struct timespec ts = { .tv_sec = 0, .tv_nsec = 2000000L };  // 2ms
             nanosleep(&ts, NULL);
             continue;
+        }
+
+        // Back off the retry pace itself (not just the logging) while no
+        // host is draining the gadget - see the write-error handling
+        // below for why writes fail in that state. Hammering
+        // snd_pcm_writei()/snd_pcm_recover() - a real ioctl round-trip -
+        // at the nominal ~10.7ms per-period pace forever, for as long as
+        // minibitx runs with no USB host attached, would make "no USB
+        // cable" a persistent low-grade cost instead of the genuinely
+        // free, fully-supported "optional" mode of operation this
+        // project has always intended (usb_gadget.h) - the same lesson
+        // as the xrun-flood and IQ-pacer-thread fixes elsewhere in this
+        // codebase, just showing up a third time in a new spot. Ramps
+        // from one period up to a ~1s cap as the failure streak grows; a
+        // single successful write resets it immediately. Samples queued
+        // during the backoff are simply dropped by the ring buffer's
+        // normal overflow behavior (uac_push_iq()) - there's no host
+        // listening to miss them anyway.
+        if (err_streak > 0) {
+            unsigned backoff_periods = err_streak;
+            if (backoff_periods > 100) backoff_periods = 100;  // cap ~1.07s
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 10700000L };
+            for (unsigned b = 0; b < backoff_periods && uac_writer_running; b++)
+                nanosleep(&ts, NULL);
+            if (!uac_writer_running) break;
         }
 
         for (int s = 0; s < UAC_BUF_FRAMES; s++) {
@@ -510,25 +538,32 @@ static void *uac_writer_thread(void *arg) {
             // capture stream for reading. In that state the kernel's
             // UAC2 function driver can't queue endpoint requests at
             // all, and every write here fails - usually with -EIO
-            // rather than -EPIPE (bench-observed 2026-09; unlike the
-            // old snd-aloop path this replaced, which silently buffered
+            // rather than -EPIPE (bench-observed 2026-09; unlike the old
+            // snd-aloop path this replaced, which silently buffered
             // instead of failing outright - see
-            // docs/usb_gadget_os_setup.md §11). This recovers on its
-            // own once a host attaches and starts draining - it's not
-            // an error worth stopping over - but printing on every
-            // single ~10.7ms period for as long as minibitx runs with
-            // no host attached would flood the console/journal, so this
-            // is throttled to the first occurrence and then once every
-            // 500 (~5s at this period size) instead of every one.
-            if (err_streak == 0 || err_streak % 500 == 0) {
+            // docs/usb_gadget_os_setup.md §11). This is a normal,
+            // expected state (minibitx is meant to run fine with no USB
+            // host at all), not a fault - so log the *transition* into it
+            // once, not every retry (which the backoff above has already
+            // slowed to at most once a second anyway, but even that
+            // forever would misrepresent a fully-supported idle state as
+            // an ongoing error).
+            if (host_was_draining) {
                 fprintf(stderr,
-                        "uac: snd_pcm_writei error: %s (host not draining? "
-                        "%u consecutive)\n",
-                        snd_strerror((int)written), err_streak + 1);
+                        "uac: no USB host draining the gadget yet (%s) - "
+                        "will keep retrying quietly in the background\n",
+                        snd_strerror((int)written));
+                host_was_draining = 0;
             }
             err_streak++;
             snd_pcm_recover(uac_pcm_handle, (int)written, 1 /*silent*/);
         } else {
+            if (!host_was_draining) {
+                fprintf(stderr,
+                        "uac: USB host draining again after %u failed write(s)\n",
+                        err_streak);
+                host_was_draining = 1;
+            }
             err_streak = 0;
         }
     }
