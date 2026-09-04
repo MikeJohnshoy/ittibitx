@@ -444,6 +444,10 @@ static int uac_alsa_open(void) {
 static void *uac_writer_thread(void *arg) {
     (void)arg;
 
+    // Consecutive-failure counter for the throttled logging below - see
+    // the comment at the write-error handling at the bottom of the loop.
+    unsigned err_streak = 0;
+
     while (uac_writer_running) {
         unsigned head = atomic_load_explicit(&uac_q_head, memory_order_acquire);
         unsigned tail = atomic_load_explicit(&uac_q_tail, memory_order_relaxed);
@@ -495,13 +499,37 @@ static void *uac_writer_thread(void *arg) {
             // Buffer underrun (most commonly: no host draining the
             // gadget yet) - attempt recovery then retry once.
             snd_pcm_prepare(uac_pcm_handle);
-            snd_pcm_writei(uac_pcm_handle, uac_pcm_buf,
-                           (snd_pcm_uframes_t)UAC_BUF_FRAMES);
-        } else if (written < 0) {
-            // Other ALSA error — log once, then recover
-            fprintf(stderr, "uac: snd_pcm_writei error: %s\n",
-                    snd_strerror((int)written));
+            written = snd_pcm_writei(uac_pcm_handle, uac_pcm_buf,
+                                     (snd_pcm_uframes_t)UAC_BUF_FRAMES);
+        }
+
+        if (written < 0) {
+            // Most commonly this means no USB host has actually
+            // activated this gadget's capture streaming interface yet -
+            // cable unplugged, or plugged in but no app has opened the
+            // capture stream for reading. In that state the kernel's
+            // UAC2 function driver can't queue endpoint requests at
+            // all, and every write here fails - usually with -EIO
+            // rather than -EPIPE (bench-observed 2026-09; unlike the
+            // old snd-aloop path this replaced, which silently buffered
+            // instead of failing outright - see
+            // docs/usb_gadget_os_setup.md §11). This recovers on its
+            // own once a host attaches and starts draining - it's not
+            // an error worth stopping over - but printing on every
+            // single ~10.7ms period for as long as minibitx runs with
+            // no host attached would flood the console/journal, so this
+            // is throttled to the first occurrence and then once every
+            // 500 (~5s at this period size) instead of every one.
+            if (err_streak == 0 || err_streak % 500 == 0) {
+                fprintf(stderr,
+                        "uac: snd_pcm_writei error: %s (host not draining? "
+                        "%u consecutive)\n",
+                        snd_strerror((int)written), err_streak + 1);
+            }
+            err_streak++;
             snd_pcm_recover(uac_pcm_handle, (int)written, 1 /*silent*/);
+        } else {
+            err_streak = 0;
         }
     }
 
