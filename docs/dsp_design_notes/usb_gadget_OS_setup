@@ -433,22 +433,32 @@ project at all - removed from §3's `modules-load.d` file and from
 **Bench-observed immediately after this fix**: with the real
 `UAC2Gadget` card wired up, `uac_writer_thread()`'s `snd_pcm_writei()`
 calls started failing with `Input/output error` (`-EIO`) - continuously,
-one line per ~10.7ms period, forever - as soon as minibitx started, well
-before any host was attached. This is expected, not a regression: unlike
-the old `snd-aloop` path (which silently buffered writes with nothing
-ever reading them - the bug this section fixes), the real gadget PCM
-correctly refuses writes outright whenever no USB host has actually
-activated the capture streaming interface (cable unplugged, or plugged
-in but no app has opened the stream for reading yet) - the kernel can't
-queue endpoint requests in that state. It should clear up on its own
-once a host attaches and starts draining. The flood of identical log
-lines was still worth fixing on its own: `uac_writer_thread()` now
-throttles this to the first occurrence and then one line per ~500
-consecutive failures (~5s), tagging it "(host not draining? N
-consecutive)" rather than repeating forever unthrottled.
+one attempt per ~10.7ms period, forever - as soon as minibitx started,
+well before any host was attached. This part is expected, not a
+regression: unlike the old `snd-aloop` path (which silently buffered
+writes with nothing ever reading them - the bug this section fixes), the
+real gadget PCM correctly refuses writes outright whenever no USB host
+has actually activated the capture streaming interface (cable
+unplugged, or plugged in but no app has opened the stream for reading
+yet) - the kernel can't queue endpoint requests in that state.
+
+Retrying at full ~10.7ms pace forever in that state was its own bug,
+though, and directly at odds with this project's standing design: the
+USB gadget has always been meant to be fully optional - minibitx runs
+fine with no cable attached at all (`usb_gadget.h`, §1 above) - so
+paying for a real ioctl round-trip a hundred times a second, forever,
+just because nothing is plugged in isn't "optional," it's a permanent
+low-grade cost hiding behind that word. Same lesson as §7's xrun-flood
+fix and `hpsdr_p1.c`'s IQ pacer thread, just surfacing a third time in a
+new spot. Fixed in `uac_writer_thread()`: the retry pace itself now
+backs off - ramping from one period up to a ~1s cap as the failure
+streak grows - and the log line only fires on the *transition* into and
+out of "no host draining," not on every retry, so a permanently
+unplugged gadget costs one line at startup and then nothing further, not
+a line every second forever either.
 
 Not yet re-verified against real hardware as of this writing - update
 this section once an SDR/audio app on the host actually shows a live
-signal (with a host genuinely attached and draining, the `-EIO` flood
-above should also disappear on its own - if it doesn't, that's the next
-thing to chase).
+signal (with a host genuinely attached and draining, the "no USB host
+draining" state above should clear on its own, logged once, and stay
+clear - if it doesn't, that's the next thing to chase).
