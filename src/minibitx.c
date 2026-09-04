@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
   printf("init: HPSDR Protocol 1 listening on UDP %d\n", HPSDR_PORT);
 
   // Bring up the USB Audio Class (UAC2) IQ gadget, if the hardware/kernel
-  // support it (needs a USB device-mode controller and snd-aloop). Not a
+  // support it (needs a USB device-mode controller and libcomposite). Not a
   // hard failure if it's unavailable - minibitx keeps running over
   // HPSDR/UDP either way. uac_init() reports its own success ("init: USB
   // IQ gadget bound to UDC...").
