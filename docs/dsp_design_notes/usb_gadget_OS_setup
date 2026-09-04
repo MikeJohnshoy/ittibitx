@@ -3,9 +3,13 @@
 Status: §3-§8 are all bench-confirmed on real hardware (2026-09, Pi 4,
 Raspberry Pi OS Trixie) - the gadget binds cleanly (including on repeat
 restarts, not just the first boot) and minibitx starts clean with no
-xrun flood, both with the USB-C cable disconnected and connected. Not
-yet bench-verified end-to-end (i.e. an SDR app actually receiving audio
-over the link) — see §9 once that's been tried.
+xrun flood, both with the USB-C cable disconnected and connected. §10's
+Windows enumeration failure is resolved (USB-A port on the host). §11
+identifies and fixes the reason no actual audio ever reached the host
+despite everything else checking out (writes were going to an
+unconnected `snd-aloop` loopback card instead of the gadget's own
+`UAC2Gadget` card) - not yet re-verified end-to-end on real hardware
+since that fix; see §11's closing note and §9 once that's done.
 
 ## 1. Background
 
@@ -64,18 +68,20 @@ This gets `dwc2` loaded early enough in boot to register as a UDC before
 anything (like minibitx) needs it.
 
 **`/etc/modules-load.d/minibitx-usb-gadget.conf`** - create this new
-file containing just these two lines:
+file containing just this line:
 
 ```
 libcomposite
-snd-aloop
 ```
 
 `dwc2` alone isn't enough: `usb_gadget.c` also needs `libcomposite`
 (registers the `/sys/kernel/config/usb_gadget/` configfs subsystem - its
-absence is exactly the "No such file or directory" in the log above) and
-`snd-aloop` (the ALSA loopback pair the UAC2 function's capture side
-reads from).
+absence is exactly the "No such file or directory" in the log above).
+`snd-aloop` is **not** needed - an earlier version of this document and
+of `usb_gadget.c` assumed the UAC2 function read its data from an
+`snd-aloop` loopback pair; it doesn't. See §11 for what actually feeds
+the gadget's audio (its own kernel-created `UAC2Gadget` ALSA card) and
+why the loopback module was never actually load-bearing here.
 
 ## 4. Power: the part most people trip over
 
@@ -95,7 +101,6 @@ Before even launching minibitx:
 ```
 ls /sys/kernel/config/usb_gadget/     # should exist (even empty) - libcomposite loaded
 ls /sys/class/udc/                    # should show one entry - dwc2 came up as a peripheral UDC
-cat /proc/asound/cards                # should list a "Loopback" card
 ```
 
 The first command is expected to print **nothing** on success - an empty
@@ -106,13 +111,13 @@ subtree there. An actual failure looks like `ls: cannot access
 Don't try to confirm a module loaded by typing its name as a command
 (e.g. typing `libcomposite` at the prompt) - module names aren't
 programs, that'll just get you `command not found`; use `lsmod | grep
-libcomposite` (or `snd-aloop`) if you want to check directly instead of
-relying on the three commands above.
+libcomposite` if you want to check directly instead of relying on the
+two commands above.
 
-It's normal to see more than one `Loopback` card (e.g. `Loopback` and
-`Loopback_1`) - `snd-aloop` creates several by default.
-`usb_gadget.c`'s `uac_find_loopback_card()` matches the exact id
-`Loopback`, so it always picks the first one and ignores the rest.
+There's no `snd-aloop`/`Loopback` card to check for at this stage (see
+§11) - the card that actually matters here (`UAC2Gadget`) only appears
+once minibitx has bound the gadget to the UDC, so `cat /proc/asound/cards`
+is a §9/§11-time check, not a pre-flight one.
 
 If `/sys/class/udc/` is empty, the overlay didn't take (recheck
 `config.txt` and that you edited the `firmware` path) or something else
@@ -281,7 +286,7 @@ Once the above all check out, start minibitx and look for:
 
 ```
 init: USB IQ gadget bound to UDC '<name>'
-uac: ALSA loopback PCM opened: hw:N,0,1 @ 48000 Hz, 24-bit, 2 ch
+uac: UAC2Gadget ALSA PCM opened: hw:N,0 @ 48000 Hz, 24-bit, 2 ch
 uac: USB IQ audio stream ready — device name: 'sBitx IQ'
 ```
 
@@ -299,3 +304,132 @@ setup reports Ethernet/serial gadgets working most reliably, with audio
 gadgets needing more care around USB-vs-local clock drift - not expected
 to be a problem for minibitx's one-way capture-only use here, but worth
 confirming by ear/eye on first test).
+
+## 10. Windows: "Unknown USB Device (Device Descriptor Request Failed)"
+
+Bench-observed 2026-09: Windows 11 Device Manager shows this under
+"Universal Serial Bus controllers" the moment the Pi's USB-C cable is
+plugged in, with minibitx's own console showing the gadget bound
+successfully (§5-§9 all otherwise checking out).
+
+This is **not a UAC2/audio problem, and almost certainly not a
+`usb_gadget.c` configuration problem either** - "Device Descriptor
+Request Failed" happens during the very first step of USB enumeration
+(the host's initial partial `GET_DESCRIPTOR(DEVICE)` control request),
+before Windows has read the configuration descriptor, before it's
+picked a class driver, and long before anything UAC2-specific (like the
+Clock Source Entity requirement `usb_uac_decimation_design.md` and
+earlier discussion here worried about) would even matter. Everything
+`uac_gadget_create()` writes under configfs - `idVendor`, the UAC2
+function's rate/size/channel settings, the strings - lives at a higher
+protocol layer than this failure. So this points at the physical/
+electrical link, not application-level configuration: the cable, the
+host's USB port, or power.
+
+Prioritized things to try, cheapest first:
+
+1. **Swap the cable.** This is the single most commonly reported fix
+   for this exact symptom on Pi 4 gadget-mode setups. The Pi 4 has a
+   well-documented USB-C hardware defect (a single shared pull-down
+   resistor across both CC lines, instead of the one-per-line the USB-C
+   spec calls for) that causes some cables - particularly "smart"/
+   electronically-marked ones, Apple's own USB-C cables among them - to
+   misbehave against the Pi's port. Community reports for gadget mode
+   specifically point to plain USB-C-to-A cables (AmazonBasics USB-C
+   2.0 and Anker Powerline are the two named in the thread that matches
+   this symptom most closely) as reliably working, and a marked/
+   high-wattage-charging cable as reliably not. Since this project's
+   setup already powers the Pi via GPIO rather than the USB-C cable
+   (§4), a plain USB-C-to-A data cable is the right kind to use here
+   regardless - there's no power-delivery role for this cable to play
+   at all.
+2. **Try a different USB port on the Windows PC** - ideally a USB 2.0
+   port wired directly to the motherboard, not a USB 3.x port, not a
+   hub, not a front-panel/extension header. dwc2 here is a plain USB
+   2.0 High-Speed controller; eliminating hubs and extension cables
+   removes several variables that have independently been reported to
+   cause exactly this failure with unrelated USB 2.0 gadgets.
+3. **Confirm the Pi's own power is solid** - GPIO 5V/GND (§4), not the
+   USB-C cable, and not a marginal supply. A brownout at the exact
+   moment dwc2 tries to respond to the host's enumeration request could
+   plausibly produce this same failure.
+4. **Watch `dmesg -w` on the Pi itself** while plugging into the
+   Windows PC, to see whether dwc2 logs anything at all at that moment
+   (a reset detected, a speed negotiated, an error). Nothing logged on
+   the Pi side despite Windows showing the failed-descriptor device
+   points even more strongly at the cable/port than at anything
+   softwareconfigurable here.
+5. **If another host is available** (a Linux or Mac machine, even
+   briefly), try enumerating there instead. If it enumerates cleanly
+   elsewhere, this is Windows/port/cable-specific, not a fundamental
+   problem with the gadget itself; if it fails everywhere, that points
+   harder at the cable or the Pi's own port/power.
+
+Bench-confirmed 2026-09: item 2 resolved this - switching to a USB-A
+port on the Windows PC (the cable itself was already a plain USB-C-to-A
+type) got past this specific failure. A "USB Composite Device" then
+enumerates cleanly in Device Manager with no warning icon and
+`SET_CONFIGURATION` accepted - see §11 for what was found once past this
+point.
+
+## 11. Enumerates fine, but silence: the IQ data never reached the gadget
+
+Bench-observed 2026-09, once §10's Windows enumeration problem was
+resolved: a full USB Device Tree Viewer descriptor dump showed a
+completely correct UAC2 descriptor set (IAD grouping all three
+interfaces, both Clock Source Units, Terminals, Feature Units, Format
+Type I descriptors, matching Other-Speed-Configuration/Device-Qualifier
+descriptors, all string descriptors present) and `Current Config Value:
+0x01` - Windows had accepted the configuration. Opening the
+corresponding input in Audacity showed **0 amplitude even tuned to a
+strong FT8 signal**, with minibitx's own console reporting everything
+normal (gadget bound, PCM opened, HPSDR streaming fine to a separate
+client).
+
+Root cause: `uac_alsa_open()` was writing IQ samples into an `snd-aloop`
+"Loopback" card, not into the UAC2 gadget's own ALSA card. Binding a
+UAC2 function via configfs makes the kernel's `u_audio`/`f_uac2` driver
+register its **own independent ALSA sound card** for that function -
+confirmed via `cat /proc/asound/cards` on the Pi with the gadget bound:
+
+```
+ 0 [audioinjectorpi]: audioinjector-p - audioinjector-pi-soundcard
+ 1 [Loopback       ]: Loopback - Loopback
+ 2 [Loopback_1     ]: Loopback - Loopback
+ 3 [UAC2Gadget     ]: UAC2_Gadget - UAC2_Gadget
+```
+
+Card 3, `UAC2Gadget`, is the one actually wired to the real USB
+isochronous endpoint the host reads. Cards 1 and 2 are `snd-aloop`'s
+usual pair, entirely self-contained - writing into one side only ever
+reaches the *other side of that same virtual pair*, never anything
+outside it. `usb_gadget.c`'s original design (and this document's
+original §3/§5, and `usb_gadget.h`'s architecture comment) assumed the
+UAC2 function itself read its outbound audio from that loopback pair
+automatically. It doesn't, and never did - there is no such linkage
+built into `f_uac2`/`libcomposite`, and nothing in this project ever ran
+a bridging daemon (`alsaloop` or similar) to actually connect the two
+cards. Every IQ sample written since UAC2 support was first added had
+been going into a dead end: consumed only by the other end of the
+loopback pair, which nothing ever read.
+
+This bug was invisible at every layer checked before this point:
+minibitx's own console reported success (the ALSA write to the loopback
+card genuinely does succeed), and the host's USB enumeration/
+configuration is governed entirely by the configfs descriptors
+`uac_gadget_create()` writes - completely independent of what, if
+anything, is feeding the PCM behind them. Silence in an actual recording
+app was the only symptom, which is why it only surfaced once real
+end-to-end testing (§9) was finally attempted.
+
+Fixed in `usb_gadget.c`: `uac_alsa_open()` now locates the `UAC2Gadget`
+card directly (by its `/proc/asound/cardN/id`, which is driver-assigned
+and stable regardless of this project's own `sbitx_iq` configfs instance
+name) and opens its device-0 playback PCM (`hw:N,0`) instead of any
+`snd-aloop` device. `snd-aloop` is no longer a dependency of this
+project at all - removed from §3's `modules-load.d` file and from
+`usb_gadget.h`'s dependency list.
+
+Not yet re-verified against real hardware as of this writing - update
+this section once an SDR/audio app on the host actually shows a live
+signal.
