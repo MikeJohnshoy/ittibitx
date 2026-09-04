@@ -1,15 +1,13 @@
 # USB Gadget (UAC2) OS Setup — Raspberry Pi 4, USB-C Port
 
-Status: §3-§8 are all bench-confirmed on real hardware (2026-09, Pi 4,
-Raspberry Pi OS Trixie) - the gadget binds cleanly (including on repeat
-restarts, not just the first boot) and minibitx starts clean with no
-xrun flood, both with the USB-C cable disconnected and connected. §10's
-Windows enumeration failure is resolved (USB-A port on the host). §11
-identifies and fixes the reason no actual audio ever reached the host
-despite everything else checking out (writes were going to an
-unconnected `snd-aloop` loopback card instead of the gadget's own
-`UAC2Gadget` card) - not yet re-verified end-to-end on real hardware
-since that fix; see §11's closing note and §9 once that's done.
+Status: §3-§11 are all bench-confirmed end-to-end on real hardware
+(2026-09, Pi 4, Raspberry Pi OS Trixie, Windows 11 host) - the gadget
+binds cleanly (including on repeat restarts) with no xrun flood, either
+with or without the USB-C cable attached; enumerates cleanly over a
+USB-A host port (§10); and WSJT-X now opens "sBitx IQ" directly and
+decodes FT8 correctly (§9, §11) - the last open question (whether audio
+data actually reached the host at all, not just correct enumeration) is
+resolved.
 
 ## 1. Background
 
@@ -296,14 +294,19 @@ into a host computer and a UAC2 audio-capture device named "sBitx IQ"
 should enumerate there; any app that can record from a standard USB audio
 input (SDR#, HDSDR, GQRX, SDR Console, or a plain audio recorder as a
 first smoke test) should be able to pull the 24-bit/48kHz stereo I/Q
-stream (L = I, R = Q). This step hasn't been run yet as of this writing -
-record the actual result here once tried, including which host OS/app it
-was tested against, since USB gadget audio reliability is known to vary
-by host (the diyAudio RPi4-OTG-audio community thread that informed this
-setup reports Ethernet/serial gadgets working most reliably, with audio
-gadgets needing more care around USB-vs-local clock drift - not expected
-to be a problem for minibitx's one-way capture-only use here, but worth
-confirming by ear/eye on first test).
+stream (L = I, R = Q).
+
+**Bench-confirmed end-to-end, 2026-09** (Pi 4, Windows 11 host, USB-A
+port per §10): WSJT-X selected the "sBitx IQ" capture device directly
+and decoded FT8 correctly - real signal, real decode, not just a
+non-zero meter. This confirms the whole chain at once: §11's fix
+(writing to the real `UAC2Gadget` card instead of the dead-end
+`snd-aloop` loopback) actually reaches the host, the host correctly
+activates the streaming interface once an app opens it, and the
+24-bit/48kHz I/Q stream `decim48k.c` produces is clean enough for a real
+decoder to lock onto. The clock-drift concern the diyAudio
+RPi4-OTG-audio community thread raised for USB gadget audio didn't turn
+out to be a problem here, at least not at FT8's tolerances.
 
 ## 10. Windows: "Unknown USB Device (Device Descriptor Request Failed)"
 
@@ -457,8 +460,8 @@ out of "no host draining," not on every retry, so a permanently
 unplugged gadget costs one line at startup and then nothing further, not
 a line every second forever either.
 
-Not yet re-verified against real hardware as of this writing - update
-this section once an SDR/audio app on the host actually shows a live
-signal (with a host genuinely attached and draining, the "no USB host
-draining" state above should clear on its own, logged once, and stay
-clear - if it doesn't, that's the next thing to chase).
+**Re-verified end-to-end, 2026-09**: WSJT-X on Windows opened "sBitx IQ"
+and decoded FT8 correctly - see §9 for the full confirmation. The "no
+USB host draining" transition logged once at startup and cleared on its
+own (logged once more) as soon as WSJT-X opened the capture stream, with
+no further console noise after that.
