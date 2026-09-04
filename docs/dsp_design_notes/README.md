@@ -23,5 +23,13 @@ already used in `antialias_filter_design.md`.
   96kHz->48kHz decimating lowpass that makes `usb_gadget.c`'s UAC2
   gadget actually deliver the 48kHz it advertises, cascaded after
   `antialias_filter_design.md`'s own filter. Status: implemented
-  (`decim48k.c`), bench-verified numerically; not yet verified against
-  a real UAC2 host.
+  (`decim48k.c`), bench-verified numerically and now against a real
+  UAC2 host too (WSJT-X decoding FT8).
+- [`rx_gain_and_level_calibration.md`](rx_gain_and_level_calibration.md)
+  — how to approach checking/tuning RX gain now that IQ audio actually
+  reaches a real UAC2 host: why raw peak levels are relative-only
+  without a separate calibrated-signal-generator step, why that has to
+  wait on confirming the WM8731 `Line` input level (currently an
+  undocumented fixed 80%) is itself set correctly, and the recommended
+  noise-floor/strong-signal checks to do first. Status: proposed - a
+  design discussion recorded ahead of any code.
