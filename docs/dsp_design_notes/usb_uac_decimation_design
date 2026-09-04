@@ -2,7 +2,11 @@
 
 Status: implemented (`decim48k.c`, wired into `sound_process()` in
 `sound.c`, ahead of `uac_push_iq()` only). Bench-verified numerically
-(this document, §4) - not yet verified against a real UAC2 host.
+(this document, §4) and now against a real UAC2 host too: WSJT-X on
+Windows decoded FT8 correctly from the "sBitx IQ" capture device
+(2026-09, see `usb_gadget_os_setup.md` §9/§11) - the resulting
+24-bit/48kHz stream is clean enough for a real decoder, not just
+numerically correct in isolation.
 
 ## 1. Background
 
@@ -165,14 +169,14 @@ transition band, and settling at the designed ~-54dB stopband depth by
 
 This document covers the DSP correctness of the rate conversion only.
 Getting a real UAC2 host to actually see and use the resulting 48kHz
-stream is tracked in `usb_gadget_os_setup.md` §§9-11 - Windows not
-detecting the gadget device at all (§10) is resolved (a USB-A host port
-sidesteps the Pi 4's USB-C CC-line issue), and §11 fixes a deeper bug
-where IQ samples were never actually reaching the gadget's real USB
-endpoint at all (written to an unconnected `snd-aloop` card instead of
-the gadget's own `UAC2Gadget` card) - not yet re-verified end-to-end
-since that fix. Interoperating
-with the QMX/Tab5 panadapter specifically would additionally need a
+stream was tracked in `usb_gadget_os_setup.md` §§9-11 and is now fully
+resolved: Windows not detecting the gadget device at all (§10) was fixed
+by a USB-A host port (sidesteps the Pi 4's USB-C CC-line issue), §11
+fixed a deeper bug where IQ samples were never actually reaching the
+gadget's real USB endpoint at all (written to an unconnected
+`snd-aloop` card instead of the gadget's own `UAC2Gadget` card), and
+WSJT-X on Windows has since decoded FT8 correctly end-to-end (2026-09).
+Interoperating with the QMX/Tab5 panadapter specifically would additionally need a
 CDC-ACM Kenwood-style CAT serial gadget function alongside this UAC2
 one, which minibitx does not have yet - see `usb_gadget_os_setup.md`
 for that gap; this decimation fix is a necessary piece of that future
