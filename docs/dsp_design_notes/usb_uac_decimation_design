@@ -7,8 +7,9 @@ Status: implemented (`decim48k.c`, wired into `sound_process()` in
 ## 1. Background
 
 `usb_gadget.c`'s UAC2 gadget has always advertised 48kHz (`c_srate`/
-`p_srate` in `uac_gadget_create()`, and the ALSA loopback PCM in
-`uac_alsa_open()`) - that's what `usb_gadget.h`'s own architecture
+`p_srate` in `uac_gadget_create()`, and the ALSA PCM `uac_alsa_open()`
+opens on the gadget's own `UAC2Gadget` card) - that's what
+`usb_gadget.h`'s own architecture
 comment always said minibitx streams. But `sound.c` runs the WM8731
 codec at 96kHz (`SAMPLE_RATE`), and until now `uac_push_iq()` was called
 with raw, un-decimated 96kHz-rate samples straight out of
@@ -164,9 +165,13 @@ transition band, and settling at the designed ~-54dB stopband depth by
 
 This document covers the DSP correctness of the rate conversion only.
 Getting a real UAC2 host to actually see and use the resulting 48kHz
-stream is tracked in `usb_gadget_os_setup.md` (currently blocked on
-Windows not detecting the gadget device at all - a separate, USB-
-enumeration-level problem, not a sample-rate problem). Interoperating
+stream is tracked in `usb_gadget_os_setup.md` §§9-11 - Windows not
+detecting the gadget device at all (§10) is resolved (a USB-A host port
+sidesteps the Pi 4's USB-C CC-line issue), and §11 fixes a deeper bug
+where IQ samples were never actually reaching the gadget's real USB
+endpoint at all (written to an unconnected `snd-aloop` card instead of
+the gadget's own `UAC2Gadget` card) - not yet re-verified end-to-end
+since that fix. Interoperating
 with the QMX/Tab5 panadapter specifically would additionally need a
 CDC-ACM Kenwood-style CAT serial gadget function alongside this UAC2
 one, which minibitx does not have yet - see `usb_gadget_os_setup.md`
