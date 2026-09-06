@@ -1,10 +1,5 @@
 # minibitx — an experimental test bed
 
-STATUS: 
-- Network connection using HPSDR Protocol 1 or USB audio gadget works
-- Receive functions are working
-- CW transmit working 
-
 This code allows sbitx hardware to be used by SDR software like
 SDRConsole or Quisk, without having the full sBitx application running.  minibitx runs
 on the Raspberry Pi board inside your sbitx in place of
@@ -18,6 +13,11 @@ receive/transmit signal processing: spectrum and waterfall, demodulation, filter
 audio routing. minibitx started as a trimmed-down and more modular version of the much larger sbitx
 codebase, keeping only the minimum needed for an external SDR app to work with the
 hardware.  
+
+STATUS: sbitx hardware initialized execept for INA260 and forward/reflected power measurement.
+Network connection using HPSDR Protocol 1 or USB audio gadget works
+Receive functions are working on external SDR programs (SDRConsole, Quisk, WSJTX. ...)
+CW transmit working. 
 
 ## Building
 
