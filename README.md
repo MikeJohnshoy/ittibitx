@@ -16,7 +16,7 @@ hardware.
 
 STATUS: sbitx hardware initialized execept for INA260 and forward/reflected power measurement.
 Network connection using HPSDR Protocol 1 or USB audio gadget works
-Receive functions are working on external SDR programs (SDRConsole, Quisk, WSJTX. ...)
+Receive functions are working with external SDR programs (SDRConsole, Quisk, WSJTX. ...)
 CW transmit working. 
 
 ## Building
