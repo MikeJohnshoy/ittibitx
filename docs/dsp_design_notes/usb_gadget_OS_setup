@@ -465,3 +465,39 @@ and decoded FT8 correctly - see §9 for the full confirmation. The "no
 USB host draining" transition logged once at startup and cleared on its
 own (logged once more) as soon as WSJT-X opened the capture stream, with
 no further console noise after that.
+
+## 12. A single harmless Windows toast right after a Pi reboot - before minibitx even runs
+
+Bench-observed 2026-09: a "USB device not recognized" toast appears on
+the Windows host right around when the Pi finishes booting, with the
+USB-C cable already connected - but minibitx is started by hand over
+SSH *after* boot, so this happens before any gadget has been created at
+all, and before minibitx exists as a running process. It's never seen
+again afterward, including across repeated minibitx restarts on the
+same boot - once minibitx actually binds its gadget, everything
+enumerates and works cleanly (§9).
+
+This is a different symptom from §10's "Device Descriptor Request
+Failed," both in wording and in timing, and shouldn't be conflated with
+it: §10 was about minibitx's own gadget failing to enumerate once
+bound; this happens with nothing bound yet at all. Since `cmdline.txt`
+only loads the bare `dwc2` module early in boot (§3) - no `g_serial`,
+`g_ether`, or any other auto-attaching gadget function is configured to
+grab the UDC on its own - there's no phantom gadget this project's setup
+is presenting during that window. The likely explanation sits entirely
+inside the kernel's own `dwc2` driver probe: forcing the controller into
+peripheral mode (`dr_mode=peripheral`) means it does its own PHY
+bring-up/reset as it registers itself as a UDC, and `dwc2` has a known
+history of occasionally producing a brief, spurious connect-like
+transition during that init, with nothing bound yet to answer with real
+descriptors - Windows sees something appear, gets nothing coherent
+back, and reports it.
+
+Not something to chase in this codebase: it happens before minibitx is
+even running, so there's nothing in `usb_gadget.c` (or anywhere else in
+this project) that could be causing or fixing it. One harmless toast per
+reboot, no functional impact - if it's ever worth confirming precisely,
+the next step would be `dmesg -w` spanning the boot itself (not just
+minibitx's later startup) to check whether `dwc2`'s probe logs a
+reset/connect event at the moment the toast appears - not pursued
+further as of this writing.
