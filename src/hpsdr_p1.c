@@ -142,12 +142,6 @@ static uint32_t last_rx_freq = 0;
 // it's always the spectrum center, same as last_rx_freq.
 static uint32_t last_tx_freq = 0;
 
-// Accessors for radio.c (split-CW support - see hpsdr_p1.h). Both return
-// 0 until a connected client has sent at least one EP2 frame for that
-// address; callers fall back accordingly (see radio_tx_apply()).
-uint32_t hpsdr_get_tx_freq(void) { return last_tx_freq; }
-uint32_t hpsdr_get_rx_freq(void) { return last_rx_freq; }
-
 // --- Packet construction & inline transmission ------------------------------
 
 static void build_and_send_packet(void)
