@@ -5,6 +5,7 @@
 #include "si5351.h"
 #include "sound.h"
 #include "cw.h"         // CW_PITCH_HZ - TX clk2 correction, see radio_tx_apply()
+#include "hpsdr_p1.h"   // hpsdr_get_tx_freq()/hpsdr_get_rx_freq() - split CW, see radio_tx_apply()
 #include <stdio.h>
 #include <unistd.h>     // usleep() - relay-settling time, not GPIO access
 #include <pthread.h>
@@ -77,6 +78,32 @@ static pthread_once_t tx_worker_once = PTHREAD_ONCE_INIT;
 static void radio_tx_apply(int tx_on)
 {
     if (tx_on) {
+        // Split CW: retune to the operator's TX VFO (HPSDR C&C addr
+        // 0x01, tracked in hpsdr_p1.c and exposed via
+        // hpsdr_get_tx_freq()) before keying. hpsdr_p1.c's own
+        // process_ep2_frame() already does the equivalent retune for
+        // network-driven MOX (an SDR app asserting its own PTT), but that
+        // path is never reached by the LOCAL straight key (cw.c calls
+        // radio_set_tx() directly, and process_ep2_frame() defers to the
+        // key completely via cw_tx_active()) - this is that same logic
+        // for this file's TX-worker path instead, so a physical key
+        // gets split behavior too. Falls back to the last-known RX
+        // frequency, then does nothing at all (transmits wherever
+        // freq_hdr already is, exactly as before this change) if no
+        // HPSDR client has ever sent either - so plain non-split
+        // operation, and operation with no SDR Console/HPSDR client
+        // connected at all (e.g. rigctld-only control), are both
+        // unaffected.
+        //
+        // This runs on the TX worker thread (see the thread-handoff
+        // comment above), not the audio thread cw.c calls from - si5351
+        // I2C writes and GPIO access have no business on the real-time
+        // audio path, same reasoning as everything else in this handoff.
+        uint32_t tx_freq = hpsdr_get_tx_freq();
+        if (!tx_freq) tx_freq = hpsdr_get_rx_freq();
+        if (tx_freq && tx_freq != (uint32_t)freq_hdr)
+            radio_tune_to(tx_freq);
+
         // Correct clk2 for the CW_PITCH_HZ gap between cw.c's TX carrier
         // (CW_PITCH_HZ + TX_IF_OFFSET_HZ) and the RX_IF_FREQ_HZ that
         // radio_tune_to()'s shared formula assumes - left uncorrected,
@@ -85,12 +112,12 @@ static void radio_tx_apply(int tx_on)
         // docs/03_tx_processing_pipeline.md's "Known limitations" and
         // cw.h's comment on CW_PITCH_HZ for the full derivation). Applied
         // here - the one place all TX (straight key via cw.c, and remote
-        // MOX via hpsdr_p1.c, possibly after its own radio_tune_to() to a
-        // split TX frequency) funnels through - rather than in
+        // MOX via hpsdr_p1.c) funnels through, using freq_hdr AFTER the
+        // possible split retune just above - rather than in
         // radio_tune_to() itself, since that call is also used for plain
         // RX retuning and must not carry this offset there. Done before
-        // PTT/the relay so the correction is in effect before any RF
-        // actually reaches the antenna.
+        // PTT/the relay so both the retune and the correction are in
+        // effect before any RF actually reaches the antenna.
         si5351bx_setfreq(2, freq_hdr + bfo_freq - RX_IF_FREQ_HZ + CW_PITCH_HZ);
         radio_hw_set_ptt(1);
         usleep(20000);              // let PTT assert before keying the relay
@@ -101,13 +128,22 @@ static void radio_tx_apply(int tx_on)
         radio_hw_set_ptt(0);
         usleep(5000);               // let the relay settle before dropping PTT
         radio_hw_set_tx_relay(0);
+
+        // Split CW: snap back to the RX frequency now that TX has fully
+        // disengaged, rather than leaving freq_hdr parked on the TX split
+        // frequency until the next inbound EP2 packet's "follow the SDR
+        // app's tuning while receiving" check (hpsdr_p1.c's
+        // handle_command()) happens to notice and correct it. A no-op
+        // whenever split never moved us (last_rx_freq == freq_hdr
+        // already, or no client has ever sent addr 0x02 either).
+        uint32_t rx_freq = hpsdr_get_rx_freq();
+        if (rx_freq && rx_freq != (uint32_t)freq_hdr)
+            radio_tune_to(rx_freq);
+
         // Restore clk2 to the plain RX formula (undo the +CW_PITCH_HZ
-        // above) now that TX has fully disengaged - matters most for the
-        // straight-key path, which has no separate radio_tune_to() call
-        // to undo this on its own (unlike hpsdr_p1.c's MOX-with-split-TX-
-        // frequency path, which already retunes back to last_rx_freq
-        // after MOX off - this is a harmless no-op redundant restore in
-        // that case).
+        // above) now that TX has fully disengaged - matters even when
+        // the retune just above was a no-op, since radio_tune_to() only
+        // sets the plain (non-CW-corrected) formula itself.
         si5351bx_setfreq(2, freq_hdr + bfo_freq - RX_IF_FREQ_HZ);
     }
 }
